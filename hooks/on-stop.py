@@ -14,14 +14,23 @@ import time
 ROOT = os.environ.get("CLAUDE_PLUGIN_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "lib"))
 BIN = os.path.join(ROOT, "bin")
-CACHE = os.path.join(ROOT, ".ck-cache")
 THROTTLE_SEC = 30 * 60
 
 try:
-    from ck_config import load_config
+    from ck_config import load_config, state_dir
 except Exception:
     def load_config():
         return {"autoswitch": False}
+
+    def state_dir():
+        d = os.path.join(os.path.expanduser("~"), ".cache", "claude_knows")
+        try:
+            os.makedirs(d, exist_ok=True)
+        except OSError:
+            pass
+        return d
+
+CACHE = state_dir()
 
 
 def _noop():

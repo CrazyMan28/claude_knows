@@ -16,13 +16,21 @@ import sys
 ROOT = os.environ.get("CLAUDE_PLUGIN_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "lib"))
 try:
-    from ck_config import load_config
+    from ck_config import load_config, state_dir
 except Exception:
     def load_config():
         return {"autoswitch": False, "quiet": False, "default_tier": "sonnet"}
 
+    def state_dir():
+        d = os.path.join(os.path.expanduser("~"), ".cache", "claude_knows")
+        try:
+            os.makedirs(d, exist_ok=True)
+        except OSError:
+            pass
+        return d
+
 BIN = os.path.join(ROOT, "bin")
-CACHE = os.path.join(ROOT, ".ck-cache")
+CACHE = state_dir()
 
 
 def _noop():
@@ -92,6 +100,14 @@ def main():
     if is_chitchat(prompt):
         _noop()
 
+    # Mark this session as handled BEFORE the (slow) model call, so no later prompt
+    # in this session can route even if the routing below takes a few seconds.
+    try:
+        os.makedirs(CACHE, exist_ok=True)
+        open(marker, "w").close()
+    except OSError:
+        pass
+
     cfg = load_config()
     try:
         out = subprocess.run(
@@ -130,12 +146,6 @@ def main():
         f"When you dispatch subagents for this task, prefer model '{tier}'."
     )
     sysmsg = f"🧭 claude_knows: {slash} — {reason}{switched_note}"
-
-    try:
-        os.makedirs(CACHE, exist_ok=True)
-        open(marker, "w").close()
-    except OSError:
-        pass
 
     print(json.dumps({
         "systemMessage": sysmsg,

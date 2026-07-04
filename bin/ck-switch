@@ -18,7 +18,8 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-STATE_DIR="$ROOT/.ck-cache"; mkdir -p "$STATE_DIR"
+# Stable state dir outside the plugin install dir (survives plugin updates).
+STATE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/claude_knows"; mkdir -p "$STATE_DIR"
 
 tier=""; session="${CK_SESSION:-default}"; dry=""
 while [ $# -gt 0 ]; do

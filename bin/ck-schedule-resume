@@ -14,7 +14,8 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CACHE="$ROOT/.ck-cache"; mkdir -p "$CACHE"
+# Stable state dir outside the plugin install dir (survives plugin updates).
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/claude_knows"; mkdir -p "$CACHE"
 
 # --- date helpers that work on both GNU coreutils (Linux) and BSD date (macOS) ---
 _epoch_of() {  # $1 = when-string -> epoch on stdout, empty on failure

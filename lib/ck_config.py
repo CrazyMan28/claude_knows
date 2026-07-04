@@ -96,3 +96,23 @@ def tier_info(cfg, tier):
 def transcript_root():
     """Where Claude Code stores per-project session JSONL transcripts."""
     return os.path.join(os.path.expanduser("~"), ".claude", "projects")
+
+
+def state_dir():
+    """Stable, writable dir for per-session state (markers, pending switches).
+
+    Deliberately OUTSIDE the plugin install dir, which gets wiped on plugin
+    update/re-sync — that would reset the 'first message' marker mid-session.
+    """
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    d = os.path.join(base, "claude_knows")
+    try:
+        os.makedirs(d, exist_ok=True)
+        return d
+    except OSError:
+        d = "/tmp/claude_knows"
+        try:
+            os.makedirs(d, exist_ok=True)
+        except OSError:
+            pass
+        return d
