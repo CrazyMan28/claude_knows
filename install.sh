@@ -82,9 +82,10 @@ $(c_say "installed ✔")
 Next steps
   • Reload your shell:   exec \$SHELL      (or open a new terminal)
   • Just run:            claude           → opens in tmux with live model-switching ON
-  • Your FIRST prompt of a session gets a 🧭 model pick (once); a ⏳ warning appears near your REAL usage limit.
+  • Your FIRST real prompt of a session → Haiku reads it and picks the model (~5s, once).
+    Greetings ("hi") are ignored. A ⏳ warning appears near your REAL usage limit.
   • Real usage anytime:  claude plugin details ${PLUGIN}
 
-One-offs / toggles:  CK_NO_TMUX=1 claude   CK_ROUTER_LLM=1   CK_NEAR_LIMIT_PCT=80   CK_QUIET=1
+One-offs / toggles:  CK_NO_TMUX=1 claude   CK_ROUTER_LLM=0 (heuristics-only)   CK_NEAR_LIMIT_PCT=80   CK_QUIET=1
 Uninstall:  claude plugin uninstall ${PLUGIN}${WRAP_ADDED:+  (then delete the claude_knows block in $WRAP_ADDED)}
 EOF
