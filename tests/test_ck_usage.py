@@ -76,7 +76,7 @@ with tempfile.TemporaryDirectory() as d:
 
 check("active window tokens = 350000", r["window_tokens"] == 350000)
 check("auto-learned ceiling = 400000 (historical max block)", r["ceiling_tokens"] == 400000)
-check("used pct = 87.5", r["window_used_pct"] == 87.5)
+check("used pct = 87.5", r["five_hour_pct"] == 87.5)
 check("near_limit true (>=80%)", r["near_limit"] is True)
 check("resets in ~180 min", 178 <= r["resets_in_min"] <= 181)
 check("resets_at is 2026-07-04T01:00", r["resets_at"].startswith("2026-07-04T01:00"))

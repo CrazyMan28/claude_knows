@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""ck-usage — read your own Claude Code usage from local session transcripts.
+"""ck-usage — your REAL Claude Code usage.
 
-Parses ~/.claude/projects/**/*.jsonl (the same data ccusage / the Swift menu-bar
-apps use), reconstructs the rolling N-hour usage "block", and estimates how close
-you are to your limit plus when it resets.
+By default it calls the same server endpoint Claude Code's `/usage` uses
+(GET https://api.anthropic.com/api/oauth/usage, with your local OAuth token) and
+returns the REAL five-hour and seven-day utilization % and reset times — not an
+estimate.
 
-    ck-usage                 # compact JSON
+If the token is missing/expired or the call fails, it falls back to a local
+estimate computed from ~/.claude/projects/**/*.jsonl (the ccusage approach).
+
+    ck-usage                 # real numbers (compact JSON)
     ck-usage --pretty        # human summary
-    ck-usage --root DIR --now 2026-07-03T22:00:00Z   # for tests / what-if
-
-The percentage is an ESTIMATE: Anthropic doesn't publish exact plan ceilings, so
-by default the ceiling is auto-learned as the largest block seen in the lookback
-window (same caveat ccusage carries). Set a fixed ceiling with CK_CEILING_TOKENS.
+    ck-usage --estimate      # force the local-JSONL estimate
+    ck-usage --root DIR --now ISO   # estimate mode for tests / what-if
 """
 import glob
 import json
@@ -23,6 +24,105 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "lib"))
 from ck_config import load_config, transcript_root  # noqa: E402
 
+USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+OAUTH_BETA = "oauth-2025-04-20"
+
+
+# ----------------------------- REAL (server) --------------------------------
+
+def _credentials_paths():
+    seen = []
+    cfg_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+    home = os.path.expanduser("~")
+    for base in (cfg_dir, os.path.join(home, ".claude"), os.path.join(home, ".claude-secondary")):
+        if base and base not in seen:
+            seen.append(base)
+            yield os.path.join(base, ".credentials.json")
+
+
+def _read_token():
+    for path in _credentials_paths():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                oa = (json.load(f) or {}).get("claudeAiOauth") or {}
+            if oa.get("accessToken"):
+                return oa["accessToken"], oa.get("expiresAt")
+        except (OSError, json.JSONDecodeError, KeyError):
+            continue
+    return None, None
+
+
+def _plan_tier():
+    """Best-effort plan name from .claude.json (no secret)."""
+    for path in _credentials_paths():
+        cj = os.path.join(os.path.dirname(path), ".claude.json")
+        try:
+            with open(cj, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            t = (d.get("oauthAccount") or {}).get("organizationRateLimitTier")
+            if t:
+                return t
+        except (OSError, json.JSONDecodeError):
+            continue
+    return None
+
+
+def real_usage(cfg, now):
+    token, _ = _read_token()
+    if not token:
+        return None
+    try:
+        import urllib.request
+
+        req = urllib.request.Request(
+            USAGE_URL,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "anthropic-beta": OAUTH_BETA,
+                "User-Agent": "claude_knows/0.1",
+                "Content-Type": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception:
+        return None
+
+    fh = data.get("five_hour") or {}
+    sd = data.get("seven_day") or {}
+    pct = fh.get("utilization")
+    resets = fh.get("resets_at")
+    resets_in = None
+    if resets:
+        try:
+            dt = datetime.fromisoformat(resets.replace("Z", "+00:00"))
+            resets_in = int((dt - now).total_seconds() // 60)
+        except ValueError:
+            pass
+
+    severity = "normal"
+    for lim in data.get("limits") or []:
+        if lim.get("kind") == "session":
+            severity = lim.get("severity", "normal")
+
+    near_pct = float(cfg.get("usage", {}).get("near_limit_pct", 80))
+    return {
+        "source": "api",
+        "estimate": False,
+        "plan": _plan_tier(),
+        "five_hour_pct": pct,
+        "resets_at": resets,
+        "resets_in_min": resets_in,
+        "seven_day_pct": sd.get("utilization"),
+        "seven_day_resets_at": sd.get("resets_at"),
+        "severity": severity,
+        "near_limit_pct": near_pct,
+        "near_limit": bool(pct is not None and pct >= near_pct),
+        "now": now.isoformat(),
+    }
+
+
+# ----------------------------- ESTIMATE (local) -----------------------------
 
 def _parse_ts(ts):
     if not ts:
@@ -43,14 +143,12 @@ def _msg_tokens(usage):
 
 
 def collect_events(root, since):
-    """Yield (timestamp, tokens) for assistant messages newer than `since`."""
     events = []
     scanned = 0
-    pattern = os.path.join(root, "**", "*.jsonl")
-    for path in glob.glob(pattern, recursive=True):
+    for path in glob.glob(os.path.join(root, "**", "*.jsonl"), recursive=True):
         try:
             if datetime.fromtimestamp(os.path.getmtime(path), timezone.utc) < since:
-                continue  # whole file is older than the lookback window
+                continue
         except OSError:
             continue
         try:
@@ -79,8 +177,6 @@ def collect_events(root, since):
 
 
 def build_blocks(events, window):
-    """Group events into blocks: a new block starts on a >window gap or when the
-    current block would exceed `window` in length. Returns list of dicts."""
     blocks = []
     cur = None
     last_ts = None
@@ -94,114 +190,105 @@ def build_blocks(events, window):
     return blocks
 
 
+def estimate_usage(cfg, root, now, lookback_days):
+    ucfg = cfg.get("usage", {})
+    window = timedelta(hours=float(ucfg.get("window_hours", 5)))
+    near_pct = float(ucfg.get("near_limit_pct", 80))
+    since = now - timedelta(days=lookback_days)
+    events, scanned = collect_events(root, since)
+    blocks = build_blocks(events, window)
+
+    active = blocks[-1] if blocks and now < blocks[-1]["start"] + window else None
+    window_tokens = active["tokens"] if active else 0
+    resets_at = (active["start"] + window) if active else None
+    resets_in = int((resets_at - now).total_seconds() // 60) if resets_at else None
+
+    ceiling_mode = ucfg.get("ceiling_mode", "auto-learn")
+    ceiling = ucfg.get("ceiling_tokens")
+    if ceiling_mode != "fixed" or not ceiling:
+        ceiling = max(max((b["tokens"] for b in blocks), default=0), window_tokens) or None
+        ceiling_mode = "auto-learn"
+    pct = round(100.0 * window_tokens / ceiling, 1) if ceiling else None
+
+    weekly_tokens = sum(tok for ts, tok in events if ts >= now - timedelta(days=7))
+    return {
+        "source": "estimate",
+        "estimate": True,
+        "now": now.isoformat(),
+        "five_hour_pct": pct,
+        "resets_at": resets_at.isoformat() if resets_at else None,
+        "resets_in_min": resets_in,
+        "seven_day_pct": None,
+        "window_tokens": window_tokens,
+        "ceiling_tokens": ceiling,
+        "ceiling_mode": ceiling_mode,
+        "weekly_tokens": weekly_tokens,
+        "messages_scanned": scanned,
+        "near_limit_pct": near_pct,
+        "near_limit": bool(pct is not None and pct >= near_pct),
+    }
+
+
+# ----------------------------- output ---------------------------------------
+
+def _fmt_reset(r):
+    if not r.get("resets_at"):
+        return "no active window"
+    m = r.get("resets_in_min")
+    if m is None:
+        return r["resets_at"][11:16] + " UTC"
+    hh, mm = divmod(max(m, 0), 60)
+    return f"{r['resets_at'][11:16]} UTC (in {hh}h{mm:02d}m)"
+
+
+def _print_pretty(r):
+    real = not r.get("estimate")
+    pct = r.get("five_hour_pct")
+    bar_n = int((pct or 0) / 5)
+    bar = "#" * min(bar_n, 20) + "-" * max(0, 20 - bar_n)
+    tag = "REAL (server)" if real else "estimate (local)"
+    flag = "  ⚠ NEAR LIMIT" if r.get("near_limit") else ""
+    plan = f"  [{r['plan']}]" if r.get("plan") else ""
+    print(f"claude_knows usage — {tag}{plan}{flag}")
+    print(f"  5-hour   : [{bar}] {pct if pct is not None else '?'}%   resets {_fmt_reset(r)}")
+    if r.get("seven_day_pct") is not None:
+        sd = r.get("seven_day_resets_at") or ""
+        print(f"  7-day    : {r['seven_day_pct']}%   resets {sd[:10]}")
+    if r.get("estimate"):
+        print(f"  (local estimate: {r.get('window_tokens', 0):,} tok in window, "
+              f"ceiling {r.get('ceiling_tokens') or '?'}, {r.get('messages_scanned', 0)} msgs)")
+
+
 def main():
     argv = sys.argv[1:]
     pretty = "--pretty" in argv
     cfg = load_config()
-    ucfg = cfg.get("usage", {})
-    window_hours = float(ucfg.get("window_hours", 5))
-    window = timedelta(hours=window_hours)
-    near_pct = float(ucfg.get("near_limit_pct", 80))
 
-    root = transcript_root()
     now = datetime.now(timezone.utc)
+    root = transcript_root()
     lookback_days = 8
+    force_estimate = "--estimate" in argv
     for i, a in enumerate(argv):
         if a == "--root" and i + 1 < len(argv):
-            root = argv[i + 1]
+            root = argv[i + 1]; force_estimate = True
         elif a == "--now" and i + 1 < len(argv):
-            now = _parse_ts(argv[i + 1]) or now
+            now = _parse_ts(argv[i + 1]) or now; force_estimate = True
         elif a == "--lookback-days" and i + 1 < len(argv):
             try:
                 lookback_days = int(argv[i + 1])
             except ValueError:
                 pass
 
-    since = now - timedelta(days=lookback_days)
-    events, scanned = collect_events(root, since)
-    blocks = build_blocks(events, window)
-
-    # Active block = last block whose window has not yet elapsed.
-    active = None
-    if blocks:
-        last = blocks[-1]
-        if now < last["start"] + window:
-            active = last
-
-    window_tokens = active["tokens"] if active else 0
-    resets_at = (active["start"] + window) if active else None
-    resets_in_min = int((resets_at - now).total_seconds() // 60) if resets_at else None
-
-    # Ceiling
-    ceiling_mode = ucfg.get("ceiling_mode", "auto-learn")
-    ceiling = ucfg.get("ceiling_tokens")
-    if ceiling_mode != "fixed" or not ceiling:
-        hist_max = max((b["tokens"] for b in blocks), default=0)
-        ceiling = max(hist_max, window_tokens) or None
-        ceiling_mode = "auto-learn"
-
-    pct = round(100.0 * window_tokens / ceiling, 1) if ceiling else None
-
-    # Burn rate over the active block
-    burn = None
-    eta = None
-    if active:
-        mins = max((active["end"] - active["start"]).total_seconds() / 60.0, 1.0)
-        burn = int(window_tokens / mins)
-        if ceiling and burn > 0:
-            eta = int(max(ceiling - window_tokens, 0) / burn)
-
-    weekly_cut = now - timedelta(days=7)
-    weekly_tokens = sum(tok for ts, tok in events if ts >= weekly_cut)
-
-    result = {
-        "now": now.isoformat(),
-        "window_hours": window_hours,
-        "active_block_start": active["start"].isoformat() if active else None,
-        "resets_at": resets_at.isoformat() if resets_at else None,
-        "resets_in_min": resets_in_min,
-        "window_tokens": window_tokens,
-        "ceiling_tokens": ceiling,
-        "ceiling_mode": ceiling_mode,
-        "window_used_pct": pct,
-        "near_limit": bool(pct is not None and pct >= near_pct),
-        "near_limit_pct": near_pct,
-        "burn_rate_per_min": burn,
-        "eta_limit_min": eta,
-        "weekly_tokens": weekly_tokens,
-        "messages_scanned": scanned,
-        "estimate": True,
-    }
+    result = None
+    if not force_estimate:
+        result = real_usage(cfg, now)
+    if result is None:
+        result = estimate_usage(cfg, root, now, lookback_days)
 
     if pretty:
         _print_pretty(result)
     else:
         print(json.dumps(result))
-
-
-def _fmt_reset(r):
-    if not r.get("resets_at"):
-        return "no active window"
-    m = r["resets_in_min"]
-    hh, mm = divmod(max(m, 0), 60)
-    return f"{r['resets_at'][11:16]} UTC (in {hh}h{mm:02d}m)"
-
-
-def _print_pretty(r):
-    pct = r["window_used_pct"]
-    bar_n = int((pct or 0) / 5)
-    bar = "#" * bar_n + "-" * (20 - bar_n)
-    flag = "  ⚠ NEAR LIMIT" if r["near_limit"] else ""
-    print(f"claude_knows usage (estimate){flag}")
-    print(f"  5h window : [{bar}] {pct if pct is not None else '?'}%  "
-          f"({r['window_tokens']:,} / {r['ceiling_tokens'] or '?':,} tok, {r['ceiling_mode']})"
-          if r["ceiling_tokens"] else
-          f"  5h window : {r['window_tokens']:,} tok (no ceiling learned yet)")
-    print(f"  resets    : {_fmt_reset(r)}")
-    if r["burn_rate_per_min"]:
-        eta = f", ~{r['eta_limit_min']}m to limit" if r["eta_limit_min"] is not None else ""
-        print(f"  burn rate : {r['burn_rate_per_min']:,} tok/min{eta}")
-    print(f"  this week : {r['weekly_tokens']:,} tok (incl. cache)   ({r['messages_scanned']} msgs scanned)")
 
 
 if __name__ == "__main__":

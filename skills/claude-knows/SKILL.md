@@ -25,14 +25,14 @@ Tiers: `haiku` = trivial/lookup, `sonnet` = normal coding (default), `opus` = ha
 
 When a turn ends near your limit you may see:
 
-> `[claude_knows usage] ⏳ You are at ~85% of your 5-hour usage window (estimate; resets 01:00 UTC, in 2h10m). Decide for yourself: ...`
+> `[claude_knows usage] ⏳ You are at 85% of your 5-hour usage window (resets 01:00 UTC, in 2h10m). Decide for yourself: ...`
 
 **This is a judgement call, and it's yours.** Weigh how much work is left:
 
 - **Nearly done** (a few small steps): just finish. Ignore the warning. Do NOT schedule anything.
 - **Substantial work remains** (many steps, long build/migration): tell the user you're near the limit, then **schedule a resume at the reset time and pause**, so the work continues automatically when the window resets.
 
-The percentage is an estimate (Anthropic doesn't publish exact ceilings), so don't treat it as a hard stop — treat it as "getting close, plan ahead."
+The percentage is the **real** number from the server (`/api/oauth/usage`, same as `/usage`) when your token is available; if it says "(local estimate)" it fell back to transcript math. Either way, treat it as "getting close, plan ahead," not a hard stop.
 
 ## Scheduling a resume
 

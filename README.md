@@ -5,7 +5,7 @@
 `claude_knows` is a [Claude Code](https://code.claude.com) plugin with two features:
 
 1. **Auto model-picker** — reads every prompt and picks the right model (**Haiku / Sonnet / Opus**). When Claude Code runs inside **tmux** it *actually switches the live model*; otherwise it surfaces a one-keystroke suggestion, and it always routes dispatched subagents to the right model.
-2. **Usage self-awareness** — reads your own local session transcripts to estimate your **5-hour rolling-window usage** and when it resets, drops that status **into the chat**, and lets **Claude itself decide** whether to finish now or **schedule a resume** for when the limit resets.
+2. **Usage self-awareness** — reads your **real** 5-hour and 7-day usage % and reset times (the same `GET /api/oauth/usage` endpoint Claude Code's `/usage` uses, via your local OAuth token; a local-transcript estimate is the offline fallback), drops that status **into the chat**, and lets **Claude itself decide** whether to finish now or **schedule a resume** for when the limit resets.
 
 > Everything here was verified against the current Claude Code docs *and* against real community tools before it was built. The honest limits are spelled out below — nothing is oversold.
 
@@ -80,8 +80,8 @@ sequenceDiagram
     participant Resume as ck-schedule-resume
 
     CC->>Stop: turn ends
-    Stop->>Usage: read ~/.claude/projects JSONL
-    Usage-->>Stop: {window %, resets_at, near_limit}
+    Stop->>Usage: GET /api/oauth/usage (real) — JSONL estimate if offline
+    Usage-->>Stop: {five_hour %, resets_at, near_limit}
     alt near limit (throttled 1/30min)
         Stop-->>Claude: ⏳ "~85% used, resets 01:00…"
         Claude->>Claude: how much work is left?
@@ -95,7 +95,7 @@ sequenceDiagram
     end
 ```
 
-**`ck-usage`** parses the same `~/.claude/projects/**/*.jsonl` transcripts the Swift menu-bar apps read. It reconstructs the rolling 5-hour "block", sums the tokens in it, estimates % against an auto-learned ceiling (the largest block it has seen — Anthropic doesn't publish exact ceilings, so it's clearly labeled an **estimate**), and computes the reset time and burn rate.
+**`ck-usage`** calls the same server endpoint Claude Code's `/usage` uses — `GET https://api.anthropic.com/api/oauth/usage`, authenticated with the OAuth token in your local `.credentials.json` — and returns your **real** `five_hour` and `seven_day` utilization % and reset times (identical to what `/usage` shows). If the token is missing/expired or you're offline, it falls back to a **local estimate** from `~/.claude/projects/**/*.jsonl` (the ccusage approach: rolling 5-hour block vs. an auto-learned ceiling), clearly labelled as an estimate.
 
 ---
 
@@ -108,30 +108,43 @@ sequenceDiagram
 | Switch outside tmux | `xdotool` (Linux/X11) / AppleScript (macOS) types `/model` | ✅ fragile fallback |
 | Recommend + one-keystroke switch | injected `🧭` line, you press `/opus` | ✅ always |
 | Route subagents to the right model | Agent/Task `model` override | ✅ |
-| Read own usage %, reset time | parse local JSONL transcripts | ✅ (estimate) |
+| Read own **real** usage %, reset time | `GET /api/oauth/usage` (your OAuth token) | ✅ real |
+| Usage when offline / no token | local JSONL estimate fallback | ✅ estimate |
 | Put usage status in chat → Claude decides | `Stop` hook `additionalContext` | ✅ |
 | Schedule a resume at reset | `ck-schedule-resume` (`at` / detached) or native `/schedule` | ✅ |
 | Silently switch model by editing `settings.json` | — read once at startup, no hot-reload | ❌ next session only |
 | Force `/model` from a hook | — hooks emit text/context only | ❌ |
-| Exact official usage ceilings | — not published | ❌ estimate only |
+| Real usage % / reset | `GET /api/oauth/usage` | ✅ real (offline → estimate) |
 
 ---
 
 ## Install
 
+**One-liner (Linux & macOS):**
+
 ```bash
-# clone
-git clone https://github.com/CrazyMan28/claude_knows ~/claude_knows
-
-# try it in one session (no global install)
-claude --plugin-dir ~/claude_knows
-
-# get the true live model-switch: run Claude Code inside tmux, and enable autoswitch
-tmux
-CK_AUTOSWITCH=1 claude --plugin-dir ~/claude_knows
+curl -fsSL https://raw.githubusercontent.com/CrazyMan28/claude_knows/main/install.sh | bash
 ```
 
-Requirements: `python3` (engines) and, for live switching, `tmux` (recommended) or `xdotool`/macOS. For self-resume: `at` (or it falls back to a detached timer) and the `claude` CLI.
+Installing into a second Claude config? Prefix it:
+
+```bash
+CLAUDE_CONFIG_DIR="$HOME/.claude-secondary" bash -c \
+  "$(curl -fsSL https://raw.githubusercontent.com/CrazyMan28/claude_knows/main/install.sh)"
+```
+
+**Or with the plugin CLI directly:**
+
+```bash
+claude plugin marketplace add https://github.com/CrazyMan28/claude_knows
+claude plugin install claude-knows@claude_knows
+```
+
+**Or try it for one session, no install:** `claude --plugin-dir ~/path/to/claude_knows`
+
+Then **restart Claude Code**. For the true live model-switch, run inside tmux with `CK_AUTOSWITCH=1 claude`.
+
+Requirements: `python3` (engines) + the `claude` CLI. For live switching: `tmux` (recommended) or `xdotool`/macOS. For self-resume: `at` (or a detached-timer fallback).
 
 ## Configure
 

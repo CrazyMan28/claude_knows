@@ -60,7 +60,7 @@ def main():
     if _throttled(session):
         _noop()
 
-    pct = u.get("window_used_pct")
+    pct = u.get("five_hour_pct")
     resets = u.get("resets_at") or ""
     rin = u.get("resets_in_min")
     reset_h = (resets[11:16] + " UTC") if len(resets) >= 16 else "unknown"
@@ -68,10 +68,11 @@ def main():
     if rin is not None:
         hh, mm = divmod(max(rin, 0), 60)
         inm = f" (in {hh}h{mm:02d}m)"
+    qual = "" if u.get("source") == "api" else " (local estimate)"
 
     ctx = (
-        f"[claude_knows usage] ⏳ You are at ~{pct}% of your 5-hour usage window "
-        f"(estimate; resets {reset_h}{inm}). Decide for yourself: if substantial work is still "
+        f"[claude_knows usage] ⏳ You are at {pct}% of your 5-hour usage window{qual} "
+        f"(resets {reset_h}{inm}). Decide for yourself: if substantial work is still "
         f"queued, invoke the `claude-knows` skill to schedule a resume at the reset time and then "
         f"pause; if you're nearly done, just finish and ignore this."
     )

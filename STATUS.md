@@ -18,7 +18,8 @@ Two features, both built and locally verified:
 |---|---|---|
 | `bin/ck-route` (router engine) | ✅ done | `tests/test_ck_route.py` (12/12) + CLI smoke |
 | `bin/ck-switch` (live model switch) | ✅ done | real `tmux send-keys` injected `/opus` into a live pane |
-| `bin/ck-usage` (usage engine) | ✅ done | `tests/test_ck_usage.py` (11/11) + run on real 2,675-msg history |
+| `bin/ck-usage` (usage engine) | ✅ done | **REAL** via `GET /api/oauth/usage` (verified: 69% / resets 12:29am, matches `/usage`); JSONL estimate fallback; tests 11/11 |
+| `install.sh` (Linux/macOS one-liner) | ✅ done | `bash -n` clean; uses `claude plugin marketplace add` + `install` |
 | `bin/ck-schedule-resume` (self-resume) | ✅ done | real `at` job scheduled, verified in `atq`, then removed |
 | `hooks/on-prompt.py` (UserPromptSubmit) | ✅ done | simulated hook stdin → correct suggestion JSON |
 | `hooks/on-stop.py` (Stop) | ✅ done | idle→no-op, forced near-limit→inject, throttle→no-op |
@@ -35,7 +36,7 @@ Two features, both built and locally verified:
 ## Known limitations (by design)
 
 - No silent switching of the **main** session's model without tmux/xdotool/AppleScript.
-- Usage % is an **estimate** (Anthropic doesn't publish exact plan ceilings); auto-learned from your own history.
+- Usage % is now **real** (from `/api/oauth/usage`, same source as `/usage`). The local-JSONL path is only a fallback for when the OAuth token is missing/expired/offline, and that fallback is an estimate.
 - Auto-switch applies to your **next** prompt (the current turn's model is already fixed) and is safest when the pane is idle.
 
 ## Next / optional (Phase D)
