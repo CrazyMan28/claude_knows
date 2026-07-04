@@ -1,6 +1,6 @@
 ---
 name: claude-knows
-description: How to act on claude_knows signals — the model-routing suggestion injected on each prompt, and the usage-limit status injected when you're near your 5-hour window. Use when you see a "[claude_knows]" or "[claude_knows usage]" message, or when deciding which model to use or whether to pause and schedule a resume near the usage limit.
+description: How to act on claude_knows signals — the model-routing suggestion injected on your first prompt of a session, and the usage-limit status injected when you're near your 5-hour window. Use when you see a "[claude_knows]" or "[claude_knows usage]" message, or when deciding which model to use or whether to pause and schedule a resume near the usage limit.
 ---
 
 # claude_knows — acting on the signals
@@ -9,12 +9,12 @@ This plugin injects two kinds of messages into the conversation. Here's what to 
 
 ## 1. Model routing signal
 
-On every prompt you may see:
+On the **first prompt of a session** (only) you may see:
 
 > `[claude_knows] Best model for this task: opus (claude-opus-4-8) — hard-task keyword detected. ...`
 
 What to do:
-- **The plugin already surfaced the recommendation to the user** (a `🧭` line). You do **not** need to repeat it every turn.
+- **The plugin already surfaced the recommendation to the user** (a `🧭` line), once, at the start of the session. You do **not** need to repeat it.
 - **If auto-switch is off** and the recommended tier clearly differs from the current model, you may briefly note that the user can press the slash command (e.g. `/opus`) to switch — but only once, don't nag.
 - **When you dispatch subagents** (the Task/Agent tool) for this task, pass the suggested tier as the subagent's `model` (e.g. `model: "opus"`). This is the one place model selection is fully under your control, so honor the routing there.
 - The router is a heuristic. If you can tell the task is harder/easier than the suggestion, trust your own judgement.

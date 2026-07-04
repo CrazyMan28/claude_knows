@@ -4,7 +4,7 @@
 
 `claude_knows` is a [Claude Code](https://code.claude.com) plugin with two features:
 
-1. **Auto model-picker** — reads every prompt and picks the right model (**Haiku / Sonnet / Opus**). When Claude Code runs inside **tmux** it *actually switches the live model*; otherwise it surfaces a one-keystroke suggestion, and it always routes dispatched subagents to the right model.
+1. **Auto model-picker** — reads your **first prompt of a session** and picks the right model (**Haiku / Sonnet / Opus**), then stays out of your way for the rest of the session. When Claude Code runs inside **tmux** it *actually switches the live model*; otherwise it surfaces a one-keystroke suggestion, and it always routes dispatched subagents to the right model.
 2. **Usage self-awareness** — reads your **real** 5-hour and 7-day usage % and reset times (the same `GET /api/oauth/usage` endpoint Claude Code's `/usage` uses, via your local OAuth token; a local-transcript estimate is the offline fallback), drops that status **into the chat**, and lets **Claude itself decide** whether to finish now or **schedule a resume** for when the limit resets.
 
 > Everything here was verified against the current Claude Code docs *and* against real community tools before it was built. The honest limits are spelled out below — nothing is oversold.
@@ -46,7 +46,9 @@ flowchart TD
     Data[("~/.claude/projects/**/*.jsonl<br/>tokens · model · timestamp")] --> usage
 ```
 
-## Feature 1 — how a prompt gets its model
+## Feature 1 — how your first prompt gets its model
+
+Routing runs **once per session, on your first prompt** — it picks (and, in tmux, switches to) the model that fits the task you opened with, then goes quiet. Every later prompt in that session is a silent no-op.
 
 ```mermaid
 sequenceDiagram
@@ -56,18 +58,19 @@ sequenceDiagram
     participant Switch as ck-switch
     participant CC as Claude Code
 
-    You->>Hook: submit prompt
+    You->>Hook: FIRST prompt of the session
+    Note over Hook: later prompts → no-op<br/>(per-session marker)
     Hook->>Route: prompt text (stdin)
     Route-->>Hook: {tier, model, reason}
     alt autoswitch on AND in tmux
         Hook->>Switch: switch to tier
-        Switch->>CC: tmux send-keys "/opus" ⏎  (real live switch, next prompt)
+        Switch->>CC: tmux send-keys "/opus" ⏎  (real live switch)
     end
     Hook-->>CC: additionalContext + 🧭 systemMessage
     Note over CC: subagents dispatched<br/>use the routed model
 ```
 
-**The router (`ck-route`)** is hybrid: fast heuristic rules decide the obvious ~90% instantly and for free (keywords like *refactor/architect/debug* → opus, *typo/rename/what is* → haiku, length + code signals for the rest). An optional Haiku tie-break (`CK_ROUTER_LLM=1`) handles genuinely ambiguous prompts. Off by default = zero per-prompt cost and latency.
+**The router (`ck-route`)** is hybrid: fast heuristic rules decide the obvious ~90% instantly and for free (keywords like *refactor/architect/debug* → opus, *typo/rename/what is* → haiku, length + code signals for the rest). An optional Haiku tie-break (`CK_ROUTER_LLM=1`) handles genuinely ambiguous first prompts. Off by default = zero cost and latency.
 
 ## Feature 2 — usage awareness & self-resume
 

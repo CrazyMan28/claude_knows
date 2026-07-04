@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""UserPromptSubmit hook: route the prompt to a model, surface it, optionally switch.
+"""UserPromptSubmit hook: on the FIRST prompt of a session, route it to a model.
 
-Reads the hook JSON on stdin (userPrompt, session_id), runs ck-route, and returns
-`additionalContext` (for Claude) + `systemMessage` (for the user). If autoswitch is
-enabled it also calls ck-switch (real live switch when in tmux). Never blocks the
-prompt; any internal error degrades to an empty (no-op) hook result.
+Reads the hook JSON on stdin (userPrompt, session_id), runs ck-route on your first
+prompt, returns `additionalContext` (for Claude) + `systemMessage` (for the user),
+and — if autoswitch is on — calls ck-switch (real live switch when in tmux). It only
+fires once per session (a per-session marker records it); every prompt after the
+first is a silent no-op. Any internal error degrades to an empty (no-op) result.
 """
 import json
 import os
@@ -20,11 +21,17 @@ except Exception:
         return {"autoswitch": False, "quiet": False, "default_tier": "sonnet"}
 
 BIN = os.path.join(ROOT, "bin")
+CACHE = os.path.join(ROOT, ".ck-cache")
 
 
 def _noop():
     print(json.dumps({}))
     sys.exit(0)
+
+
+def _marker(session):
+    safe = "".join(c for c in session if c.isalnum() or c in "._-") or "default"
+    return os.path.join(CACHE, "routed-" + safe)
 
 
 def main():
@@ -35,6 +42,12 @@ def main():
     prompt = data.get("userPrompt") or data.get("prompt") or ""
     session = str(data.get("session_id") or "default")
     if not prompt.strip():
+        _noop()
+
+    # Only act on the FIRST prompt of a session — pick/switch the model once, then
+    # stay silent for the rest of the session. The marker file records that we fired.
+    marker = _marker(session)
+    if os.path.exists(marker):
         _noop()
 
     cfg = load_config()
@@ -61,7 +74,7 @@ def main():
             ).stdout
             swj = json.loads(sw)
             if swj.get("switched"):
-                switched_note = f" (auto-switched via {swj.get('method')}; takes effect on your next prompt)"
+                switched_note = f" (auto-switched via {swj.get('method')}; applies from your next prompt for the rest of the session)"
             elif swj.get("method") == "noop":
                 switched_note = " (already on this model)"
         except Exception:
@@ -77,6 +90,12 @@ def main():
         f"When you dispatch subagents for this task, prefer model '{tier}'."
     )
     sysmsg = f"🧭 claude_knows: {slash} — {reason}{switched_note}"
+
+    try:
+        os.makedirs(CACHE, exist_ok=True)
+        open(marker, "w").close()
+    except OSError:
+        pass
 
     print(json.dumps({
         "systemMessage": sysmsg,

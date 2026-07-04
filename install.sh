@@ -82,7 +82,7 @@ $(c_say "installed ✔")
 Next steps
   • Reload your shell:   exec \$SHELL      (or open a new terminal)
   • Just run:            claude           → opens in tmux with live model-switching ON
-  • Each prompt shows a 🧭 model pick; a ⏳ warning appears near your REAL usage limit.
+  • Your FIRST prompt of a session gets a 🧭 model pick (once); a ⏳ warning appears near your REAL usage limit.
   • Real usage anytime:  claude plugin details ${PLUGIN}
 
 One-offs / toggles:  CK_NO_TMUX=1 claude   CK_ROUTER_LLM=1   CK_NEAR_LIMIT_PCT=80   CK_QUIET=1

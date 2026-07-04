@@ -21,7 +21,7 @@ Two features, both built and locally verified:
 | `bin/ck-usage` (usage engine) | ✅ done | **REAL** via `GET /api/oauth/usage` (verified: 69% / resets 12:29am, matches `/usage`); JSONL estimate fallback; tests 11/11 |
 | `install.sh` (Linux/macOS one-liner) | ✅ done | `bash -n` clean; uses `claude plugin marketplace add` + `install` |
 | `bin/ck-schedule-resume` (self-resume) | ✅ done | real `at` job scheduled, verified in `atq`, then removed |
-| `hooks/on-prompt.py` (UserPromptSubmit) | ✅ done | simulated hook stdin → correct suggestion JSON |
+| `hooks/on-prompt.py` (UserPromptSubmit) | ✅ done | **first-prompt-only** per session (marker file); verified: 1st→suggests, 2nd/3rd→silent, new session→suggests again |
 | `hooks/on-stop.py` (Stop) | ✅ done | idle→no-op, forced near-limit→inject, throttle→no-op |
 | `skills/claude-knows/SKILL.md` | ✅ done | decision guide for model + usage signals |
 | `config/ck.config.json` + env overrides | ✅ done | loaded by `lib/ck_config.py` |
