@@ -98,6 +98,35 @@ def transcript_root():
     return os.path.join(os.path.expanduser("~"), ".claude", "projects")
 
 
+def settings_path():
+    """This session's settings.json (honours CLAUDE_CONFIG_DIR)."""
+    base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    return os.path.join(base, "settings.json")
+
+
+def read_default_model():
+    """The persisted default model in settings.json, or None."""
+    try:
+        with open(settings_path(), "r", encoding="utf-8") as f:
+            return (json.load(f) or {}).get("model")
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def write_default_model(model):
+    """Set the persisted default model in settings.json (best-effort)."""
+    p = settings_path()
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        d["model"] = model
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(d, f, indent=2)
+        return True
+    except (OSError, json.JSONDecodeError):
+        return False
+
+
 def state_dir():
     """Stable, writable dir for per-session state (markers, pending switches).
 
