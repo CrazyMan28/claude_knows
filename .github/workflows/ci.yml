@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  scripts:
+    name: scripts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Make scripts executable
+        run: chmod +x bin/* hooks/*.py tests/run.sh install.sh
+
+      - name: Python engine tests
+        run: |
+          python3 tests/test_ck_route.py
+          python3 tests/test_ck_usage.py
+
+      - name: Shell syntax check
+        run: |
+          for f in install.sh bin/ck-switch bin/ck-schedule-resume; do
+            echo "bash -n $f"; bash -n "$f"
+          done
+
+      - name: Engine smoke (no auth / no claude CLI)
+        run: |
+          set -x
+          # Router — heuristics only (CK_ROUTER_LLM=0 avoids the Haiku CLI call)
+          CK_ROUTER_LLM=0 ./bin/ck-route "refactor the auth module across services" | grep -q '"tier": "opus"'
+          CK_ROUTER_LLM=0 ./bin/ck-route "fix a typo in the readme"                 | grep -q '"tier": "haiku"'
+          # Usage — forced local estimate (no network / token)
+          ./bin/ck-usage --estimate | grep -q '"source": "estimate"'
+          # Live switch — dry-run so it never injects keystrokes on the runner
+          ./bin/ck-switch opus --session ci --dry-run | grep -q '/opus'
+          # Resume scheduler — relative + absolute (absolute exercises BSD date on macOS)
+          ./bin/ck-schedule-resume --at +90m --prompt x --session ci             | grep -q '"in_sec"'
+          ./bin/ck-schedule-resume --at 2026-12-31T23:59:00Z --prompt x --session ci | grep -q '"in_sec"'
+
+      - name: install.sh runs end-to-end (stubbed claude)
+        run: |
+          mkdir -p "$HOME/ci-bin"
+          printf '#!/usr/bin/env bash\nexit 0\n' > "$HOME/ci-bin/claude"
+          chmod +x "$HOME/ci-bin/claude"
+          export PATH="$HOME/ci-bin:$PATH"
+          CK_NO_WRAPPER=1 bash install.sh
+
+  shellcheck:
+    name: shellcheck (lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run shellcheck (errors fail the build)
+        run: shellcheck -S error install.sh bin/ck-switch bin/ck-schedule-resume

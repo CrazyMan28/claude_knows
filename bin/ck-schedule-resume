@@ -16,6 +16,23 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CACHE="$ROOT/.ck-cache"; mkdir -p "$CACHE"
 
+# --- date helpers that work on both GNU coreutils (Linux) and BSD date (macOS) ---
+_epoch_of() {  # $1 = when-string -> epoch on stdout, empty on failure
+  local w="$1" e n u
+  case "$w" in
+    +*m) n="${w#+}"; n="${n%m}"; echo $(( $(date +%s) + n * 60 ));   return 0 ;;
+    +*h) n="${w#+}"; n="${n%h}"; echo $(( $(date +%s) + n * 3600 )); return 0 ;;
+  esac
+  e=$(date -d "$w" +%s 2>/dev/null) && { echo "$e"; return 0; }   # GNU
+  u="$w"; u="${u%%.*}"; u="${u%%+*}"; u="${u%Z}"; u="${u/T/ }"    # normalize for BSD
+  for f in "%Y-%m-%d %H:%M:%S" "%Y-%m-%d %H:%M" "%Y-%m-%d" "%H:%M"; do
+    e=$(date -j -u -f "$f" "$u" +%s 2>/dev/null) && { echo "$e"; return 0; }  # BSD
+  done
+  echo ""
+}
+_fmt_utc()     { date -u -d "@$1" +"$2" 2>/dev/null || date -u -r "$1" +"$2" 2>/dev/null; }
+_stamp_local() { date -d "@$1" '+%Y%m%d%H%M.%S' 2>/dev/null || date -r "$1" '+%Y%m%d%H%M.%S' 2>/dev/null; }
+
 when=""; prompt=""; session="${CK_SESSION:-}"; cwd="$PWD"; headless=""; do_run=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -36,15 +53,11 @@ done
 ssafe="$(printf '%s' "$session" | tr -cd 'A-Za-z0-9._-')"; [ -z "$ssafe" ] && ssafe="default"
 
 now=$(date +%s)
-case "$when" in
-  +*m) n="${when#+}"; n="${n%m}"; target=$(( now + n * 60 ));;
-  +*h) n="${when#+}"; n="${n%h}"; target=$(( now + n * 3600 ));;
-  *)   target=$(date -d "$when" +%s 2>/dev/null || echo "");;
-esac
+target=$(_epoch_of "$when")
 [ -z "${target:-}" ] && { echo "{\"scheduled\":false,\"error\":\"could not parse --at '$when'\"}"; exit 2; }
 secs=$(( target - now ))
 [ "$secs" -lt 60 ] && secs=60 && target=$(( now + 60 ))
-at_iso=$(date -u -d "@$target" '+%Y-%m-%dT%H:%M:%SZ')
+at_iso=$(_fmt_utc "$target" '%Y-%m-%dT%H:%M:%SZ')
 
 promptfile="$CACHE/resume-$ssafe.prompt"
 script="$CACHE/resume-$ssafe.sh"
@@ -65,7 +78,7 @@ chmod +x "$script"
 
 method=""
 if command -v at >/dev/null 2>&1; then
-  stamp=$(date -d "@$target" '+%Y%m%d%H%M.%S')
+  stamp=$(_stamp_local "$target")
   if printf 'bash %q\n' "$script" | at -t "$stamp" >/dev/null 2>&1; then
     method="at"
   fi

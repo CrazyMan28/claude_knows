@@ -49,7 +49,8 @@ elif ! command -v tmux >/dev/null 2>&1; then
 else
   case "${SHELL:-sh}" in
     *zsh)  RC="$HOME/.zshrc" ;;
-    *bash) RC="$HOME/.bashrc" ;;
+    # macOS Terminal runs login shells → ~/.bash_profile; Linux interactive → ~/.bashrc
+    *bash) [ "$OS" = mac ] && RC="$HOME/.bash_profile" || RC="$HOME/.bashrc" ;;
     *)     RC="$HOME/.profile" ;;
   esac
   MARK="# >>> claude_knows wrapper >>>"
