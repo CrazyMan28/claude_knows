@@ -11,6 +11,16 @@
 
 ---
 
+## ⚡ Quick install (Linux & macOS)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CrazyMan28/claude_knows/main/install.sh | bash
+```
+
+Then **restart Claude Code** — Haiku picks your model and you get real usage warnings. CI-tested on macOS + Linux. ([Other install methods & what the installer does ↓](#install))
+
+---
+
 ## Why it exists
 
 - You start a task and guess the model. Guess too big → you burn your limit on a typo fix. Guess too small → Opus-grade work gets a Haiku-grade answer. `claude_knows` picks for you.
