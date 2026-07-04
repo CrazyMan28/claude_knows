@@ -75,6 +75,36 @@ def is_chitchat(prompt):
     return all(w in _GREET or w in _FILLER for w in words)
 
 
+def typed_prompt_count(transcript_path):
+    """Count real typed user prompts already in this session's transcript (Claude
+    Code's own record). Tool-result messages have role 'user' too, so we skip those.
+    Authoritative and reinstall-proof; returns -1 if the transcript can't be read."""
+    if not transcript_path or not os.path.isfile(transcript_path):
+        return -1
+    n = 0
+    try:
+        with open(transcript_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or '"user"' not in line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if d.get("type") != "user":
+                    continue
+                content = (d.get("message") or {}).get("content")
+                if isinstance(content, list) and any(
+                    isinstance(b, dict) and b.get("type") == "tool_result" for b in content
+                ):
+                    continue  # tool result, not a typed prompt
+                n += 1
+    except OSError:
+        return -1
+    return n
+
+
 def main():
     # Guard: the model-picker spawns `claude -p` internally; don't let that inner
     # session re-trigger this hook (infinite loop).
@@ -90,9 +120,23 @@ def main():
         _noop()
 
     # Only act on the FIRST real prompt of a session — pick/switch the model once,
-    # then stay silent for the rest of the session. The marker records that we fired.
+    # then stay silent for the rest of the session.
+    #
+    # Two independent guards so this can't misfire:
+    #  1) a per-session marker in ~/.cache (survives plugin reinstalls), and
+    #  2) the transcript itself — if Claude Code already recorded >=2 typed prompts
+    #     this session, we're clearly mid-session even if the marker was wiped.
     marker = _marker(session)
     if os.path.exists(marker):
+        _noop()
+    if typed_prompt_count(data.get("transcript_path")) >= 2:
+        # Backstop for a wiped marker: definitely not the first prompt. Record it
+        # so the fast path handles the rest of the session, then stay silent.
+        try:
+            os.makedirs(CACHE, exist_ok=True)
+            open(marker, "w").close()
+        except OSError:
+            pass
         _noop()
 
     # Greetings / acks ("hi", "thanks", "how are you") are not tasks. Don't pick a

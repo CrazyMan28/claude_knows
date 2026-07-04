@@ -74,7 +74,9 @@ claude() {
   if [ -n "$TMUX" ] || [ -n "$CK_NO_TMUX" ] || ! command -v tmux >/dev/null 2>&1; then
     CK_AUTOSWITCH=1 command claude "$@"
   else
-    tmux new-session -A -s claude "CK_AUTOSWITCH=1 command claude ${*}"
+    # Unique session name (no -A): always launch a FRESH claude, never attach to a
+    # leftover session and silently drop the launch command.
+    tmux new-session -s "claude_${$}_${RANDOM}" "CK_AUTOSWITCH=1 command claude ${*}"
   fi
 }
 # <<< claude_knows wrapper <<<
