@@ -192,15 +192,17 @@ def main():
 
     # PRE-SWITCH (opt-in, CK_PRESWITCH=1): so your FIRST task runs on the right model,
     # switch NOW and re-run this exact prompt on the new model — blocking the current
-    # turn so nothing runs on the wrong one. Only in tmux, only when the pick differs
-    # from where the session starts, and only for a single-line prompt (multi-line is
-    # unsafe to re-type via send-keys). Falls through to the safe queued path otherwise.
+    # turn so nothing runs on the wrong one. Only fires on an UPGRADE (e.g. sonnet→opus):
+    # running a hard task on a weaker model is the case worth re-running for; downgrading
+    # a trivial question isn't. Only in tmux, single-line prompt (multi-line is unsafe to
+    # re-type via send-keys). Falls through to the safe queued path otherwise.
+    rank = {"haiku": 0, "sonnet": 1, "opus": 2}
     default_tier = cfg.get("default_tier", "sonnet")
     if (
         cfg.get("autoswitch")
         and _truthy(os.environ.get("CK_PRESWITCH"))
         and os.environ.get("TMUX")
-        and tier != default_tier
+        and rank.get(tier, 1) > rank.get(default_tier, 1)
         and "\n" not in prompt
         and len(prompt) <= 400
     ):
