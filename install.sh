@@ -35,9 +35,44 @@ c_say "installing plugin…"
 claude plugin install "$PLUGIN" --scope user
 
 # Optional-capability advice.
-command -v tmux >/dev/null 2>&1 || c_warn "tmux not found — real live model auto-switch needs tmux (or xdotool on Linux / macOS Accessibility). Suggest-mode works without it."
 if [ "$OS" = linux ]; then
   command -v at >/dev/null 2>&1 || c_warn "'at' not found — self-resume will use a detached-timer fallback (install 'at' for cleaner scheduling)."
+fi
+
+# Wire `claude` to auto-launch inside tmux with live model-switching ON.
+# Skip with CK_NO_WRAPPER=1; skipped automatically if tmux isn't installed.
+WRAP_ADDED=""
+if [ -n "${CK_NO_WRAPPER:-}" ]; then
+  c_say "CK_NO_WRAPPER set — skipping the tmux auto-launch wrapper."
+elif ! command -v tmux >/dev/null 2>&1; then
+  c_warn "tmux not installed — skipped the auto-tmux wrapper. Plugin still works (suggest-mode)."
+else
+  case "${SHELL:-sh}" in
+    *zsh)  RC="$HOME/.zshrc" ;;
+    *bash) RC="$HOME/.bashrc" ;;
+    *)     RC="$HOME/.profile" ;;
+  esac
+  MARK="# >>> claude_knows wrapper >>>"
+  if [ -f "$RC" ] && grep -qF "$MARK" "$RC" 2>/dev/null; then
+    c_say "tmux auto-launch wrapper already present in $RC"
+  else
+    cat >> "$RC" <<'WRAP'
+
+# >>> claude_knows wrapper >>>
+# Auto-launch `claude` inside tmux with claude_knows live model-switching ON.
+# One-off without tmux:  CK_NO_TMUX=1 claude    •    Remove: delete this block.
+claude() {
+  if [ -n "$TMUX" ] || [ -n "$CK_NO_TMUX" ] || ! command -v tmux >/dev/null 2>&1; then
+    CK_AUTOSWITCH=1 command claude "$@"
+  else
+    tmux new-session -A -s claude "CK_AUTOSWITCH=1 command claude ${*}"
+  fi
+}
+# <<< claude_knows wrapper <<<
+WRAP
+    WRAP_ADDED="$RC"
+    c_say "added tmux auto-launch wrapper to $RC"
+  fi
 fi
 
 cat <<EOF
@@ -45,13 +80,11 @@ cat <<EOF
 $(c_say "installed ✔")
 
 Next steps
-  • Restart Claude Code — plugins load at session start.
-  • Each prompt shows a 🧭 model suggestion; a ⏳ warning appears near your usage limit.
-  • For REAL live model switching, run inside tmux with autoswitch enabled:
-        tmux
-        CK_AUTOSWITCH=1 claude
-  • Real usage anytime:   claude plugin details ${PLUGIN}   (or run bin/ck-usage --pretty from the install)
+  • Reload your shell:   exec \$SHELL      (or open a new terminal)
+  • Just run:            claude           → opens in tmux with live model-switching ON
+  • Each prompt shows a 🧭 model pick; a ⏳ warning appears near your REAL usage limit.
+  • Real usage anytime:  claude plugin details ${PLUGIN}
 
-Toggles (env):  CK_AUTOSWITCH=1  CK_ROUTER_LLM=1  CK_NEAR_LIMIT_PCT=80  CK_QUIET=1
-Uninstall:      claude plugin uninstall ${PLUGIN}
+One-offs / toggles:  CK_NO_TMUX=1 claude   CK_ROUTER_LLM=1   CK_NEAR_LIMIT_PCT=80   CK_QUIET=1
+Uninstall:  claude plugin uninstall ${PLUGIN}${WRAP_ADDED:+  (then delete the claude_knows block in $WRAP_ADDED)}
 EOF

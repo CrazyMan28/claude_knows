@@ -135,7 +135,12 @@ claude plugin install claude-knows@claude_knows
 
 **Or try it for one session, no install:** `claude --plugin-dir ~/path/to/claude_knows`
 
-Then **restart Claude Code**. For the true live model-switch, run inside tmux with `CK_AUTOSWITCH=1 claude`.
+When `tmux` is installed, the one-liner also wraps `claude` so it **auto-opens in tmux with live model-switching ON** — just type `claude` and it switches models for you. Controls:
+- Skip the wrapper at install time: `CK_NO_WRAPPER=1 … | bash`
+- Run once without tmux: `CK_NO_TMUX=1 claude`
+- Remove it later: delete the `# >>> claude_knows wrapper >>>` block from your `~/.zshrc` / `~/.bashrc`
+
+Then **reload your shell** (`exec $SHELL`) or open a new terminal.
 
 Requirements: `python3` (engines) + the `claude` CLI. For live switching: `tmux` (recommended) or `xdotool`/macOS. For self-resume: `at` (or a detached-timer fallback).
 
