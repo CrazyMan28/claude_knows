@@ -1,0 +1,40 @@
+{
+  "default_tier": "sonnet",
+  "autoswitch": false,
+  "router_llm_fallback": false,
+  "quiet": false,
+  "usage": {
+    "window_hours": 5,
+    "near_limit_pct": 80,
+    "ceiling_mode": "auto-learn",
+    "ceiling_tokens": null,
+    "weekly_near_limit_pct": 85
+  },
+  "tiers": {
+    "haiku":  { "model_id": "claude-haiku-4-5", "slash": "/haiku" },
+    "sonnet": { "model_id": "claude-sonnet-5",  "slash": "/sonnet" },
+    "opus":   { "model_id": "claude-opus-4-8",  "slash": "/opus" }
+  },
+  "rules": {
+    "haiku_max_len": 35,
+    "opus_min_len_with_code": 600,
+    "build_verbs": [
+      "add", "create", "implement", "build", "write", "update", "change", "make",
+      "remove", "delete", "integrate", "connect", "handle", "fix", "generate",
+      "set up", "setup", "wire", "hook up", "install"
+    ],
+    "opus_keywords": [
+      "refactor", "architect", "architecture", "redesign", "design a", "design the",
+      "system design", "plan out", "make a plan", "root cause", "debug why", "why is",
+      "why does", "race condition", "concurrency", "deadlock", "migrate", "migration",
+      "optimize", "optimization", "performance bottleneck", "prove", "algorithm",
+      "across the codebase", "multi-file", "multiple files", "end to end", "trade-off",
+      "tradeoff", "security review", "threat model", "distributed", "scalable"
+    ],
+    "haiku_keywords": [
+      "typo", "rename", "what is", "what's", "define", "definition of", "format this",
+      "lint", "add a comment", "bump version", "list the", "spell", "capitalize",
+      "lowercase", "uppercase", "one-liner", "quick question", "tiny", "trivial"
+    ]
+  }
+}

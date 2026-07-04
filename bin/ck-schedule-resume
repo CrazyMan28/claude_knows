@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# ck-schedule-resume — schedule a "wake up and continue" at the usage-limit reset.
+#
+#   ck-schedule-resume --at <when> --prompt "<continue text>" [opts]
+#     --at <when>     +90m | +2h | 14:20 | 2026-07-04T01:00:00Z | "tomorrow 09:00"
+#     --prompt TEXT   what to tell the resumed session to do
+#     --session ID    session to --resume (default: $CK_SESSION or newest)
+#     --cwd DIR       working dir for the resumed run (default: current dir)
+#     --headless      run `claude -p` (non-interactive) instead of interactive
+#     --run           actually schedule it (default is a safe dry-run preview)
+#
+# Uses `at` if available, else a detached sleep. The prompt is stored in a file and
+# read at run time, so any quotes/newlines in it are safe. Prints a JSON result.
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+CACHE="$ROOT/.ck-cache"; mkdir -p "$CACHE"
+
+when=""; prompt=""; session="${CK_SESSION:-}"; cwd="$PWD"; headless=""; do_run=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --at) when="${2:-}"; shift 2;;
+    --prompt) prompt="${2:-}"; shift 2;;
+    --session) session="${2:-}"; shift 2;;
+    --cwd) cwd="${2:-}"; shift 2;;
+    --headless) headless="-p"; shift;;
+    --run) do_run="1"; shift;;
+    --dry-run) do_run=""; shift;;
+    *) shift;;
+  esac
+done
+
+[ -z "$when" ] && { echo '{"scheduled":false,"error":"missing --at"}'; exit 2; }
+[ -z "$prompt" ] && { echo '{"scheduled":false,"error":"missing --prompt"}'; exit 2; }
+[ -z "$session" ] && session="default"
+ssafe="$(printf '%s' "$session" | tr -cd 'A-Za-z0-9._-')"; [ -z "$ssafe" ] && ssafe="default"
+
+now=$(date +%s)
+case "$when" in
+  +*m) n="${when#+}"; n="${n%m}"; target=$(( now + n * 60 ));;
+  +*h) n="${when#+}"; n="${n%h}"; target=$(( now + n * 3600 ));;
+  *)   target=$(date -d "$when" +%s 2>/dev/null || echo "");;
+esac
+[ -z "${target:-}" ] && { echo "{\"scheduled\":false,\"error\":\"could not parse --at '$when'\"}"; exit 2; }
+secs=$(( target - now ))
+[ "$secs" -lt 60 ] && secs=60 && target=$(( now + 60 ))
+at_iso=$(date -u -d "@$target" '+%Y-%m-%dT%H:%M:%SZ')
+
+promptfile="$CACHE/resume-$ssafe.prompt"
+script="$CACHE/resume-$ssafe.sh"
+
+if [ -z "$do_run" ]; then
+  printf '{"scheduled":false,"dry_run":true,"at":"%s","in_sec":%d,"session":"%s","headless":%s,"cwd":"%s"}\n' \
+    "$at_iso" "$secs" "$ssafe" "$([ -n "$headless" ] && echo true || echo false)" "$cwd"
+  exit 0
+fi
+
+printf '%s' "$prompt" > "$promptfile"
+cat > "$script" <<EOF
+#!/usr/bin/env bash
+cd "$cwd" || exit 1
+exec claude --resume "$session" $headless "\$(cat "$promptfile")"
+EOF
+chmod +x "$script"
+
+method=""
+if command -v at >/dev/null 2>&1; then
+  stamp=$(date -d "@$target" '+%Y%m%d%H%M.%S')
+  if printf 'bash %q\n' "$script" | at -t "$stamp" >/dev/null 2>&1; then
+    method="at"
+  fi
+fi
+if [ -z "$method" ]; then
+  log="$CACHE/resume-$ssafe.log"
+  nohup bash -c "sleep $secs; bash '$script' >> '$log' 2>&1" >/dev/null 2>&1 &
+  method="sleep+nohup(pid $!)"
+fi
+
+printf '{"scheduled":true,"method":"%s","at":"%s","in_sec":%d,"session":"%s","script":"%s"}\n' \
+  "$method" "$at_iso" "$secs" "$ssafe" "$script"

@@ -1,0 +1,208 @@
+#!/usr/bin/env python3
+"""ck-usage — read your own Claude Code usage from local session transcripts.
+
+Parses ~/.claude/projects/**/*.jsonl (the same data ccusage / the Swift menu-bar
+apps use), reconstructs the rolling N-hour usage "block", and estimates how close
+you are to your limit plus when it resets.
+
+    ck-usage                 # compact JSON
+    ck-usage --pretty        # human summary
+    ck-usage --root DIR --now 2026-07-03T22:00:00Z   # for tests / what-if
+
+The percentage is an ESTIMATE: Anthropic doesn't publish exact plan ceilings, so
+by default the ceiling is auto-learned as the largest block seen in the lookback
+window (same caveat ccusage carries). Set a fixed ceiling with CK_CEILING_TOKENS.
+"""
+import glob
+import json
+import os
+import sys
+from datetime import datetime, timedelta, timezone
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "lib"))
+from ck_config import load_config, transcript_root  # noqa: E402
+
+
+def _parse_ts(ts):
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+
+
+def _msg_tokens(usage):
+    return (
+        int(usage.get("input_tokens", 0) or 0)
+        + int(usage.get("output_tokens", 0) or 0)
+        + int(usage.get("cache_creation_input_tokens", 0) or 0)
+        + int(usage.get("cache_read_input_tokens", 0) or 0)
+    )
+
+
+def collect_events(root, since):
+    """Yield (timestamp, tokens) for assistant messages newer than `since`."""
+    events = []
+    scanned = 0
+    pattern = os.path.join(root, "**", "*.jsonl")
+    for path in glob.glob(pattern, recursive=True):
+        try:
+            if datetime.fromtimestamp(os.path.getmtime(path), timezone.utc) < since:
+                continue  # whole file is older than the lookback window
+        except OSError:
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or '"usage"' not in line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    msg = obj.get("message") or {}
+                    usage = msg.get("usage") or obj.get("usage")
+                    if not usage:
+                        continue
+                    ts = _parse_ts(obj.get("timestamp") or msg.get("timestamp"))
+                    if ts is None or ts < since:
+                        continue
+                    scanned += 1
+                    events.append((ts, _msg_tokens(usage)))
+        except OSError:
+            continue
+    events.sort(key=lambda e: e[0])
+    return events, scanned
+
+
+def build_blocks(events, window):
+    """Group events into blocks: a new block starts on a >window gap or when the
+    current block would exceed `window` in length. Returns list of dicts."""
+    blocks = []
+    cur = None
+    last_ts = None
+    for ts, tok in events:
+        if cur is None or (ts - cur["start"]) >= window or (last_ts and (ts - last_ts) >= window):
+            cur = {"start": ts, "end": ts, "tokens": 0}
+            blocks.append(cur)
+        cur["end"] = ts
+        cur["tokens"] += tok
+        last_ts = ts
+    return blocks
+
+
+def main():
+    argv = sys.argv[1:]
+    pretty = "--pretty" in argv
+    cfg = load_config()
+    ucfg = cfg.get("usage", {})
+    window_hours = float(ucfg.get("window_hours", 5))
+    window = timedelta(hours=window_hours)
+    near_pct = float(ucfg.get("near_limit_pct", 80))
+
+    root = transcript_root()
+    now = datetime.now(timezone.utc)
+    lookback_days = 8
+    for i, a in enumerate(argv):
+        if a == "--root" and i + 1 < len(argv):
+            root = argv[i + 1]
+        elif a == "--now" and i + 1 < len(argv):
+            now = _parse_ts(argv[i + 1]) or now
+        elif a == "--lookback-days" and i + 1 < len(argv):
+            try:
+                lookback_days = int(argv[i + 1])
+            except ValueError:
+                pass
+
+    since = now - timedelta(days=lookback_days)
+    events, scanned = collect_events(root, since)
+    blocks = build_blocks(events, window)
+
+    # Active block = last block whose window has not yet elapsed.
+    active = None
+    if blocks:
+        last = blocks[-1]
+        if now < last["start"] + window:
+            active = last
+
+    window_tokens = active["tokens"] if active else 0
+    resets_at = (active["start"] + window) if active else None
+    resets_in_min = int((resets_at - now).total_seconds() // 60) if resets_at else None
+
+    # Ceiling
+    ceiling_mode = ucfg.get("ceiling_mode", "auto-learn")
+    ceiling = ucfg.get("ceiling_tokens")
+    if ceiling_mode != "fixed" or not ceiling:
+        hist_max = max((b["tokens"] for b in blocks), default=0)
+        ceiling = max(hist_max, window_tokens) or None
+        ceiling_mode = "auto-learn"
+
+    pct = round(100.0 * window_tokens / ceiling, 1) if ceiling else None
+
+    # Burn rate over the active block
+    burn = None
+    eta = None
+    if active:
+        mins = max((active["end"] - active["start"]).total_seconds() / 60.0, 1.0)
+        burn = int(window_tokens / mins)
+        if ceiling and burn > 0:
+            eta = int(max(ceiling - window_tokens, 0) / burn)
+
+    weekly_cut = now - timedelta(days=7)
+    weekly_tokens = sum(tok for ts, tok in events if ts >= weekly_cut)
+
+    result = {
+        "now": now.isoformat(),
+        "window_hours": window_hours,
+        "active_block_start": active["start"].isoformat() if active else None,
+        "resets_at": resets_at.isoformat() if resets_at else None,
+        "resets_in_min": resets_in_min,
+        "window_tokens": window_tokens,
+        "ceiling_tokens": ceiling,
+        "ceiling_mode": ceiling_mode,
+        "window_used_pct": pct,
+        "near_limit": bool(pct is not None and pct >= near_pct),
+        "near_limit_pct": near_pct,
+        "burn_rate_per_min": burn,
+        "eta_limit_min": eta,
+        "weekly_tokens": weekly_tokens,
+        "messages_scanned": scanned,
+        "estimate": True,
+    }
+
+    if pretty:
+        _print_pretty(result)
+    else:
+        print(json.dumps(result))
+
+
+def _fmt_reset(r):
+    if not r.get("resets_at"):
+        return "no active window"
+    m = r["resets_in_min"]
+    hh, mm = divmod(max(m, 0), 60)
+    return f"{r['resets_at'][11:16]} UTC (in {hh}h{mm:02d}m)"
+
+
+def _print_pretty(r):
+    pct = r["window_used_pct"]
+    bar_n = int((pct or 0) / 5)
+    bar = "#" * bar_n + "-" * (20 - bar_n)
+    flag = "  ⚠ NEAR LIMIT" if r["near_limit"] else ""
+    print(f"claude_knows usage (estimate){flag}")
+    print(f"  5h window : [{bar}] {pct if pct is not None else '?'}%  "
+          f"({r['window_tokens']:,} / {r['ceiling_tokens'] or '?':,} tok, {r['ceiling_mode']})"
+          if r["ceiling_tokens"] else
+          f"  5h window : {r['window_tokens']:,} tok (no ceiling learned yet)")
+    print(f"  resets    : {_fmt_reset(r)}")
+    if r["burn_rate_per_min"]:
+        eta = f", ~{r['eta_limit_min']}m to limit" if r["eta_limit_min"] is not None else ""
+        print(f"  burn rate : {r['burn_rate_per_min']:,} tok/min{eta}")
+    print(f"  this week : {r['weekly_tokens']:,} tok (incl. cache)   ({r['messages_scanned']} msgs scanned)")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,12 @@
+{
+  "name": "claude-knows",
+  "displayName": "claude_knows",
+  "version": "0.1.0",
+  "description": "Auto model-picker (reads your prompt, picks & live-switches Haiku/Sonnet/Opus) plus usage self-awareness (reads your own limit usage and lets Claude schedule a resume when it resets).",
+  "author": { "name": "CrazyMan28" },
+  "repository": "https://github.com/CrazyMan28/claude_knows",
+  "license": "MIT",
+  "keywords": ["model-router", "auto-model", "usage", "rate-limit", "tmux", "cron", "self-awareness"],
+  "hooks": "./hooks/hooks.json",
+  "skills": "./skills/"
+}

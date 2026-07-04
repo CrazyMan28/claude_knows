@@ -1,0 +1,9 @@
+# local state / caches
+*.log
+__pycache__/
+*.pyc
+.ck-cache/
+.DS_Store
+
+# never commit real usage dumps or transcripts
+tests/fixtures/real-*.jsonl

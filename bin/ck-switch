@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# ck-switch — switch the LIVE Claude Code model, the way tmux-orchestration setups do.
+#
+#   ck-switch <haiku|sonnet|opus | /slash> [--session <id>] [--dry-run]
+#
+# Mechanism (first that works):
+#   1. tmux      -> `tmux send-keys -l "/opus"` + Enter into the Claude pane   (real live switch)
+#   2. xdotool   -> types "/opus" + Enter into the focused window (Linux/X11)  (fragile: needs focus)
+#   3. osascript -> System Events keystroke (macOS)                            (fragile: needs focus)
+#   4. otherwise -> suggest-only (prints what to press).
+#
+# Notes:
+#  * The switch applies to your NEXT prompt (the current turn's model is already fixed),
+#    so it's safe: the "/slash" is queued as input, it never interrupts the running turn.
+#  * A per-session state file suppresses repeat switches to the same tier (no thrash).
+#  * settings.json is deliberately NOT touched: Claude Code reads `model` once at startup,
+#    so writing it would not switch the live session.
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+STATE_DIR="$ROOT/.ck-cache"; mkdir -p "$STATE_DIR"
+
+tier=""; session="${CK_SESSION:-default}"; dry=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --session) session="${2:-default}"; shift 2;;
+    --dry-run) dry="1"; shift;;
+    *) tier="$1"; shift;;
+  esac
+done
+
+emit() { printf '%s\n' "$1"; }
+
+if [ -z "$tier" ]; then emit '{"switched":false,"reason":"no tier given"}'; exit 0; fi
+case "$tier" in
+  /haiku|haiku)   slash="/haiku";  tier="haiku";;
+  /sonnet|sonnet) slash="/sonnet"; tier="sonnet";;
+  /opus|opus)     slash="/opus";   tier="opus";;
+  *) emit "{\"switched\":false,\"reason\":\"unknown tier: $tier\"}"; exit 0;;
+esac
+
+# strip characters that could break a JSON string / shell-inject the session key
+session="$(printf '%s' "$session" | tr -cd 'A-Za-z0-9._-')"
+[ -z "$session" ] && session="default"
+STATE_FILE="$STATE_DIR/last-model-$session"
+
+last="$(cat "$STATE_FILE" 2>/dev/null || true)"
+if [ "$last" = "$tier" ]; then
+  emit "{\"switched\":false,\"method\":\"noop\",\"to\":\"$slash\",\"reason\":\"already $tier\"}"
+  exit 0
+fi
+
+record() { printf '%s' "$tier" > "$STATE_FILE"; }
+
+if [ -n "${TMUX:-}" ]; then
+  pane="${TMUX_PANE:-}"
+  if [ -n "$dry" ]; then
+    record; emit "{\"switched\":true,\"method\":\"tmux(dry)\",\"to\":\"$slash\",\"pane\":\"$pane\"}"; exit 0
+  fi
+  if [ -n "$pane" ]; then
+    tmux send-keys -t "$pane" -l "$slash" && sleep 0.4 && tmux send-keys -t "$pane" Enter
+  else
+    tmux send-keys -l "$slash" && sleep 0.4 && tmux send-keys Enter
+  fi
+  rc=$?
+  if [ $rc -eq 0 ]; then record; emit "{\"switched\":true,\"method\":\"tmux\",\"to\":\"$slash\"}";
+  else emit "{\"switched\":false,\"method\":\"tmux\",\"to\":\"$slash\",\"reason\":\"send-keys failed\"}"; fi
+  exit 0
+fi
+
+if command -v xdotool >/dev/null 2>&1 && [ -n "${DISPLAY:-}" ]; then
+  if [ -n "$dry" ]; then record; emit "{\"switched\":true,\"method\":\"xdotool(dry)\",\"to\":\"$slash\"}"; exit 0; fi
+  xdotool type --clearmodifiers "$slash" && sleep 0.2 && xdotool key Return && { record; emit "{\"switched\":true,\"method\":\"xdotool\",\"to\":\"$slash\"}"; exit 0; }
+  emit "{\"switched\":false,\"method\":\"xdotool\",\"to\":\"$slash\",\"reason\":\"xdotool failed\"}"; exit 0
+fi
+
+if [ "$(uname 2>/dev/null)" = "Darwin" ]; then
+  if [ -n "$dry" ]; then record; emit "{\"switched\":true,\"method\":\"applescript(dry)\",\"to\":\"$slash\"}"; exit 0; fi
+  osascript -e "tell application \"System Events\" to keystroke \"$slash\"" -e 'tell application "System Events" to key code 36' \
+    && { record; emit "{\"switched\":true,\"method\":\"applescript\",\"to\":\"$slash\"}"; exit 0; }
+  emit "{\"switched\":false,\"method\":\"applescript\",\"to\":\"$slash\",\"reason\":\"osascript failed\"}"; exit 0
+fi
+
+emit "{\"switched\":false,\"method\":\"suggest\",\"to\":\"$slash\",\"reason\":\"no tmux/xdotool/macos; press $slash yourself\"}"

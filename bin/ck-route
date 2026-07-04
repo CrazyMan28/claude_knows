@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""ck-route — read a prompt, decide the best model tier.
+
+Usage:
+    ck-route "refactor the auth module across services"
+    echo "what is a mutex" | ck-route -
+    ck-route --pretty "write the release notes"
+
+Output (default): compact JSON {tier, model_id, slash, reason, confidence, source}.
+Pure heuristics by default (instant, free). If router_llm_fallback is enabled
+(config or CK_ROUTER_LLM=1) AND the prompt is ambiguous AND an API key is present,
+it asks Haiku to break the tie. Any failure falls back to the heuristic result.
+"""
+import json
+import os
+import re
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "lib"))
+from ck_config import load_config, tier_info  # noqa: E402
+
+CODE_SIGNALS = re.compile(
+    r"```|\bdef \b|\bfunction\b|\bclass \b|\bimport \b|=>|</|\bstack ?trace\b|"
+    r"\btraceback\b|error:|\.py\b|\.ts\b|\.tsx\b|\.js\b|\.go\b|\.rs\b|\.java\b|\bnull ?pointer\b",
+    re.IGNORECASE,
+)
+
+
+def _read_prompt(argv):
+    args = [a for a in argv if a not in ("--pretty", "--reason-only", "-")]
+    if args:
+        return " ".join(args)
+    # stdin (hook mode or piped)
+    if not sys.stdin.isatty():
+        return sys.stdin.read()
+    return ""
+
+
+def _count_hits(norm, keywords):
+    return sum(1 for kw in keywords if kw in norm)
+
+
+def classify(prompt, cfg):
+    """Return (tier, reason, confidence, ambiguous) from heuristics only."""
+    text = (prompt or "").strip()
+    norm = text.lower()
+    n = len(text)
+    words = len(text.split())
+    rules = cfg.get("rules", {})
+    default_tier = cfg.get("default_tier", "sonnet")
+
+    has_code = bool(CODE_SIGNALS.search(text)) or text.count("\n") >= 4
+    opus_hits = _count_hits(norm, rules.get("opus_keywords", []))
+    haiku_hits = _count_hits(norm, rules.get("haiku_keywords", []))
+    haiku_max_len = rules.get("haiku_max_len", 35)
+    opus_min_len = rules.get("opus_min_len_with_code", 600)
+    has_build_verb = _count_hits(norm, rules.get("build_verbs", [])) > 0
+
+    if not text:
+        return default_tier, "empty prompt -> default", "low", False
+
+    if opus_hits >= 1:
+        return "opus", "hard-task keyword detected", "high", False
+    if has_code and n >= opus_min_len:
+        return "opus", "long, code-heavy task", "high", False
+    if haiku_hits >= 1 and opus_hits == 0 and not has_code:
+        return "haiku", "trivial-task keyword", "high", False
+    # A short prompt is only trivial if it asks for nothing to be built.
+    if n <= haiku_max_len and words <= 8 and not has_code and not has_build_verb:
+        return "haiku", "short/simple prompt", "medium", False
+
+    # Landed on the default tier. Flag the murky middle for optional LLM tie-break.
+    ambiguous = has_code and words > 40
+    reason = "code task, moderate scope" if has_code else "general task"
+    return default_tier, reason, "medium", ambiguous
+
+
+def llm_tiebreak(prompt):
+    """Ask Haiku haiku|sonnet|opus. Returns tier or None on any failure."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return None
+    try:
+        import urllib.request
+
+        body = json.dumps(
+            {
+                "model": "claude-haiku-4-5",
+                "max_tokens": 8,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": (
+                            "Classify the difficulty of this coding task as exactly one "
+                            "word: haiku (trivial), sonnet (normal), or opus (hard/"
+                            "architectural). Task:\n" + prompt[:2000]
+                        ),
+                    }
+                ],
+            }
+        ).encode()
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=body,
+            headers={
+                "content-type": "application/json",
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode())
+        word = "".join(data["content"][0]["text"].lower().split())
+        for t in ("haiku", "sonnet", "opus"):
+            if t in word:
+                return t
+    except Exception:
+        return None
+    return None
+
+
+def main():
+    argv = sys.argv[1:]
+    pretty = "--pretty" in argv
+    reason_only = "--reason-only" in argv
+    cfg = load_config()
+    prompt = _read_prompt(argv)
+
+    tier, reason, confidence, ambiguous = classify(prompt, cfg)
+    source = "rules"
+    if ambiguous and cfg.get("router_llm_fallback"):
+        picked = llm_tiebreak(prompt)
+        if picked:
+            tier, reason, confidence, source = picked, "Haiku tie-break", "high", "llm"
+
+    info = tier_info(cfg, tier)
+    result = {
+        "tier": tier,
+        "model_id": info["model_id"],
+        "slash": info["slash"],
+        "reason": reason,
+        "confidence": confidence,
+        "source": source,
+    }
+
+    if reason_only:
+        print(reason)
+    elif pretty:
+        print(f"{result['slash']}  ({tier})  — {reason}  [{confidence}, {source}]")
+    else:
+        print(json.dumps(result))
+
+
+if __name__ == "__main__":
+    main()
