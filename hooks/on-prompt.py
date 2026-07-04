@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 ROOT = os.environ.get("CLAUDE_PLUGIN_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "lib"))
@@ -73,6 +74,28 @@ def is_chitchat(prompt):
     if not words:
         return True
     return all(w in _GREET or w in _FILLER for w in words)
+
+
+def _truthy(v):
+    return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _preswitch(session, slash, prompt):
+    """In tmux: type `/model X`+Enter, then re-type the user's prompt+Enter, so the
+    prompt runs on the freshly-switched model. Returns True if the keystrokes were
+    sent (caller then blocks the current turn). The re-typed prompt re-enters this
+    hook, but the session marker is already set, so it no-ops (no loop, no re-pick)."""
+    pane = os.environ.get("TMUX_PANE")
+    base = ["tmux", "send-keys"] + (["-t", pane] if pane else [])
+    try:
+        subprocess.run(base + ["-l", slash], timeout=5)
+        subprocess.run(base + ["Enter"], timeout=5)
+        time.sleep(0.5)
+        subprocess.run(base + ["-l", prompt], timeout=5)
+        subprocess.run(base + ["Enter"], timeout=5)
+        return True
+    except Exception:
+        return False
 
 
 def typed_prompt_count(transcript_path):
@@ -167,9 +190,30 @@ def main():
     reason = route.get("reason", "")
     model_id = route.get("model_id", "")
 
-    # Queue the switch to be applied when THIS turn finishes. Sending /model into
-    # the pane mid-prompt is racy (it collides with the prompt being submitted), so
-    # the Stop hook applies it while the pane is idle.
+    # PRE-SWITCH (opt-in, CK_PRESWITCH=1): so your FIRST task runs on the right model,
+    # switch NOW and re-run this exact prompt on the new model — blocking the current
+    # turn so nothing runs on the wrong one. Only in tmux, only when the pick differs
+    # from where the session starts, and only for a single-line prompt (multi-line is
+    # unsafe to re-type via send-keys). Falls through to the safe queued path otherwise.
+    default_tier = cfg.get("default_tier", "sonnet")
+    if (
+        cfg.get("autoswitch")
+        and _truthy(os.environ.get("CK_PRESWITCH"))
+        and os.environ.get("TMUX")
+        and tier != default_tier
+        and "\n" not in prompt
+        and len(prompt) <= 400
+    ):
+        if _preswitch(session, slash, prompt):
+            print(json.dumps({
+                "systemMessage": f"🧭 claude_knows: switching to {slash} and re-running your prompt on it…",
+                "continue": False,
+                "stopReason": f"claude_knows: switched to {tier} — re-running your prompt on the right model.",
+            }))
+            return
+
+    # Otherwise: queue the switch for when THIS turn finishes (Stop hook applies it
+    # while the pane is idle — sending /model mid-prompt would collide with the submit).
     switched_note = ""
     if cfg.get("autoswitch"):
         try:
