@@ -98,6 +98,48 @@ def transcript_root():
     return os.path.join(os.path.expanduser("~"), ".claude", "projects")
 
 
+def config_dir():
+    """The active Claude Code config dir. Claude Code does not always pass
+    CLAUDE_CONFIG_DIR through to hooks, so fall back to deriving it from
+    CLAUDE_PLUGIN_ROOT (…/<config-dir>/plugins/cache/…), then ~/.claude."""
+    d = os.environ.get("CLAUDE_CONFIG_DIR")
+    if d:
+        return d
+    root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
+    i = root.find(os.sep + "plugins" + os.sep)
+    if i > 0:
+        return root[:i]
+    return os.path.join(os.path.expanduser("~"), ".claude")
+
+
+def settings_path():
+    """This session's settings.json."""
+    return os.path.join(config_dir(), "settings.json")
+
+
+def read_default_model():
+    """The persisted default model in settings.json, or None."""
+    try:
+        with open(settings_path(), "r", encoding="utf-8") as f:
+            return (json.load(f) or {}).get("model")
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def write_default_model(model):
+    """Set the persisted default model in settings.json (best-effort)."""
+    p = settings_path()
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        d["model"] = model
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(d, f, indent=2)
+        return True
+    except (OSError, json.JSONDecodeError):
+        return False
+
+
 def state_dir():
     """Stable, writable dir for per-session state (markers, pending switches).
 

@@ -16,10 +16,13 @@ import sys
 ROOT = os.environ.get("CLAUDE_PLUGIN_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "lib"))
 try:
-    from ck_config import load_config, state_dir
+    from ck_config import load_config, state_dir, read_default_model
 except Exception:
     def load_config():
         return {}
+
+    def read_default_model():
+        return None
 
     def state_dir():
         d = os.path.join(os.path.expanduser("~"), ".cache", "claude_knows")
@@ -50,12 +53,29 @@ def main():
     except Exception:
         data = {}
     session = str(data.get("session_id") or "default")
-
     cfg = load_config()
+
+    # Only manage the model when the user opted into autoswitch.
+    if not cfg.get("autoswitch"):
+        _noop()
+
+    # Capture the REAL default model now, so the SessionEnd hook can restore it and
+    # undo the fact that `/model X` persists as the new default (that's the drift
+    # that left claude2 starting on Opus). Do this before any start-model switch.
+    orig = read_default_model()
+    if orig:
+        try:
+            safe = "".join(c for c in session if c.isalnum() or c in "._-") or "default"
+            os.makedirs(CACHE, exist_ok=True)
+            with open(os.path.join(CACHE, "origmodel-" + safe), "w") as f:
+                f.write(orig)
+        except OSError:
+            pass
+
     start_model = os.environ.get("CK_START_MODEL") or cfg.get("start_model")
     if not start_model or start_model not in ("haiku", "sonnet", "opus"):
         _noop()
-    if not (cfg.get("autoswitch") and os.environ.get("TMUX")):
+    if not os.environ.get("TMUX"):
         _noop()
 
     # Switch now (empty conversation → no confirmation dialog), then mark the session
