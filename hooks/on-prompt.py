@@ -12,17 +12,26 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 ROOT = os.environ.get("CLAUDE_PLUGIN_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "lib"))
 try:
-    from ck_config import load_config
+    from ck_config import load_config, state_dir
 except Exception:
     def load_config():
         return {"autoswitch": False, "quiet": False, "default_tier": "sonnet"}
 
+    def state_dir():
+        d = os.path.join(os.path.expanduser("~"), ".cache", "claude_knows")
+        try:
+            os.makedirs(d, exist_ok=True)
+        except OSError:
+            pass
+        return d
+
 BIN = os.path.join(ROOT, "bin")
-CACHE = os.path.join(ROOT, ".ck-cache")
+CACHE = state_dir()
 
 
 def _noop():
@@ -67,6 +76,61 @@ def is_chitchat(prompt):
     return all(w in _GREET or w in _FILLER for w in words)
 
 
+def _truthy(v):
+    return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _preswitch(session, slash, prompt):
+    """In tmux: type `/model X`+Enter, auto-accept the "Switch model?" dialog (a
+    second Enter — its default is "Yes"), THEN re-type the user's prompt+Enter so it
+    runs on the freshly-switched model. Returns True if the keystrokes were sent
+    (caller then blocks the current turn). The re-typed prompt re-enters this hook,
+    but the session marker is already set, so it no-ops (no loop, no re-pick)."""
+    pane = os.environ.get("TMUX_PANE")
+    base = ["tmux", "send-keys"] + (["-t", pane] if pane else [])
+    try:
+        subprocess.run(base + ["-l", slash], timeout=5)
+        subprocess.run(base + ["Enter"], timeout=5)    # submit /model X
+        time.sleep(0.7)
+        subprocess.run(base + ["Enter"], timeout=5)    # confirm "Yes, switch"
+        time.sleep(0.6)
+        subprocess.run(base + ["-l", prompt], timeout=5)
+        subprocess.run(base + ["Enter"], timeout=5)    # run the prompt on new model
+        return True
+    except Exception:
+        return False
+
+
+def typed_prompt_count(transcript_path):
+    """Count real typed user prompts already in this session's transcript (Claude
+    Code's own record). Tool-result messages have role 'user' too, so we skip those.
+    Authoritative and reinstall-proof; returns -1 if the transcript can't be read."""
+    if not transcript_path or not os.path.isfile(transcript_path):
+        return -1
+    n = 0
+    try:
+        with open(transcript_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or '"user"' not in line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if d.get("type") != "user":
+                    continue
+                content = (d.get("message") or {}).get("content")
+                if isinstance(content, list) and any(
+                    isinstance(b, dict) and b.get("type") == "tool_result" for b in content
+                ):
+                    continue  # tool result, not a typed prompt
+                n += 1
+    except OSError:
+        return -1
+    return n
+
+
 def main():
     # Guard: the model-picker spawns `claude -p` internally; don't let that inner
     # session re-trigger this hook (infinite loop).
@@ -82,15 +146,37 @@ def main():
         _noop()
 
     # Only act on the FIRST real prompt of a session — pick/switch the model once,
-    # then stay silent for the rest of the session. The marker records that we fired.
+    # then stay silent for the rest of the session.
+    #
+    # Two independent guards so this can't misfire:
+    #  1) a per-session marker in ~/.cache (survives plugin reinstalls), and
+    #  2) the transcript itself — if Claude Code already recorded >=2 typed prompts
+    #     this session, we're clearly mid-session even if the marker was wiped.
     marker = _marker(session)
     if os.path.exists(marker):
+        _noop()
+    if typed_prompt_count(data.get("transcript_path")) >= 2:
+        # Backstop for a wiped marker: definitely not the first prompt. Record it
+        # so the fast path handles the rest of the session, then stay silent.
+        try:
+            os.makedirs(CACHE, exist_ok=True)
+            open(marker, "w").close()
+        except OSError:
+            pass
         _noop()
 
     # Greetings / acks ("hi", "thanks", "how are you") are not tasks. Don't pick a
     # model off them and don't spend the one-shot — wait for the first real prompt.
     if is_chitchat(prompt):
         _noop()
+
+    # Mark this session as handled BEFORE the (slow) model call, so no later prompt
+    # in this session can route even if the routing below takes a few seconds.
+    try:
+        os.makedirs(CACHE, exist_ok=True)
+        open(marker, "w").close()
+    except OSError:
+        pass
 
     cfg = load_config()
     try:
@@ -107,9 +193,32 @@ def main():
     reason = route.get("reason", "")
     model_id = route.get("model_id", "")
 
-    # Queue the switch to be applied when THIS turn finishes. Sending /model into
-    # the pane mid-prompt is racy (it collides with the prompt being submitted), so
-    # the Stop hook applies it while the pane is idle.
+    # PRE-SWITCH (opt-in, CK_PRESWITCH=1): so your FIRST task runs on the right model,
+    # switch NOW and re-run this exact prompt on the new model — blocking the current
+    # turn so nothing runs on the wrong one. Only fires on an UPGRADE (e.g. sonnet→opus):
+    # running a hard task on a weaker model is the case worth re-running for; downgrading
+    # a trivial question isn't. Only in tmux, single-line prompt (multi-line is unsafe to
+    # re-type via send-keys). Falls through to the safe queued path otherwise.
+    rank = {"haiku": 0, "sonnet": 1, "opus": 2}
+    default_tier = cfg.get("default_tier", "sonnet")
+    if (
+        cfg.get("autoswitch")
+        and _truthy(os.environ.get("CK_PRESWITCH"))
+        and os.environ.get("TMUX")
+        and rank.get(tier, 1) > rank.get(default_tier, 1)
+        and "\n" not in prompt
+        and len(prompt) <= 400
+    ):
+        if _preswitch(session, slash, prompt):
+            print(json.dumps({
+                "systemMessage": f"🧭 claude_knows: switching to {slash} and re-running your prompt on it…",
+                "continue": False,
+                "stopReason": f"claude_knows: switched to {tier} — re-running your prompt on the right model.",
+            }))
+            return
+
+    # Otherwise: queue the switch for when THIS turn finishes (Stop hook applies it
+    # while the pane is idle — sending /model mid-prompt would collide with the submit).
     switched_note = ""
     if cfg.get("autoswitch"):
         try:
@@ -130,12 +239,6 @@ def main():
         f"When you dispatch subagents for this task, prefer model '{tier}'."
     )
     sysmsg = f"🧭 claude_knows: {slash} — {reason}{switched_note}"
-
-    try:
-        os.makedirs(CACHE, exist_ok=True)
-        open(marker, "w").close()
-    except OSError:
-        pass
 
     print(json.dumps({
         "systemMessage": sysmsg,

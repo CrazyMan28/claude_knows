@@ -43,7 +43,7 @@ jobs:
           # Usage — forced local estimate (no network / token)
           ./bin/ck-usage --estimate | grep -q '"source": "estimate"'
           # Live switch — dry-run so it never injects keystrokes on the runner
-          ./bin/ck-switch opus --session ci --dry-run | grep -q '/opus'
+          ./bin/ck-switch opus --session ci --dry-run | grep -q '/model opus'
           # Resume scheduler — relative + absolute (absolute exercises BSD date on macOS)
           ./bin/ck-schedule-resume --at +90m --prompt x --session ci             | grep -q '"in_sec"'
           ./bin/ck-schedule-resume --at 2026-12-31T23:59:00Z --prompt x --session ci | grep -q '"in_sec"'

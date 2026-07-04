@@ -74,7 +74,11 @@ claude() {
   if [ -n "$TMUX" ] || [ -n "$CK_NO_TMUX" ] || ! command -v tmux >/dev/null 2>&1; then
     CK_AUTOSWITCH=1 command claude "$@"
   else
-    tmux new-session -A -s claude "CK_AUTOSWITCH=1 command claude ${*}"
+    # Unique session name (no -A): always launch a FRESH claude, never attach to a
+    # leftover session and silently drop the launch command. When claude exits
+    # (Ctrl-C twice / Ctrl-D / /exit) the whole tmux session is torn down too.
+    local s="claude_${$}_${RANDOM}"
+    tmux new-session -s "$s" "CK_AUTOSWITCH=1 command claude ${*}; tmux kill-session -t '$s' 2>/dev/null"
   fi
 }
 # <<< claude_knows wrapper <<<

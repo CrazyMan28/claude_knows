@@ -18,7 +18,8 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-STATE_DIR="$ROOT/.ck-cache"; mkdir -p "$STATE_DIR"
+# Stable state dir outside the plugin install dir (survives plugin updates).
+STATE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/claude_knows"; mkdir -p "$STATE_DIR"
 
 tier=""; session="${CK_SESSION:-default}"; dry=""
 while [ $# -gt 0 ]; do
@@ -32,10 +33,11 @@ done
 emit() { printf '%s\n' "$1"; }
 
 if [ -z "$tier" ]; then emit '{"switched":false,"reason":"no tier given"}'; exit 0; fi
+# The real Claude Code command is `/model <alias>` — standalone /haiku etc. don't exist.
 case "$tier" in
-  /haiku|haiku)   slash="/haiku";  tier="haiku";;
-  /sonnet|sonnet) slash="/sonnet"; tier="sonnet";;
-  /opus|opus)     slash="/opus";   tier="opus";;
+  /haiku|haiku|/model\ haiku)     slash="/model haiku";  tier="haiku";;
+  /sonnet|sonnet|/model\ sonnet)  slash="/model sonnet"; tier="sonnet";;
+  /opus|opus|/model\ opus)        slash="/model opus";   tier="opus";;
   *) emit "{\"switched\":false,\"reason\":\"unknown tier: $tier\"}"; exit 0;;
 esac
 
@@ -57,10 +59,15 @@ if [ -n "${TMUX:-}" ]; then
   if [ -n "$dry" ]; then
     record; emit "{\"switched\":true,\"method\":\"tmux(dry)\",\"to\":\"$slash\",\"pane\":\"$pane\"}"; exit 0
   fi
+  # Send `/model X` + Enter, then a second Enter to auto-accept the "Switch model?"
+  # confirmation dialog (its default is "Yes, switch"). If no dialog appears (e.g.
+  # empty conversation) the extra Enter is a harmless empty submit.
   if [ -n "$pane" ]; then
-    tmux send-keys -t "$pane" -l "$slash" && sleep 0.4 && tmux send-keys -t "$pane" Enter
+    tmux send-keys -t "$pane" -l "$slash" && sleep 0.4 && tmux send-keys -t "$pane" Enter \
+      && sleep 0.7 && tmux send-keys -t "$pane" Enter
   else
-    tmux send-keys -l "$slash" && sleep 0.4 && tmux send-keys Enter
+    tmux send-keys -l "$slash" && sleep 0.4 && tmux send-keys Enter \
+      && sleep 0.7 && tmux send-keys Enter
   fi
   rc=$?
   if [ $rc -eq 0 ]; then record; emit "{\"switched\":true,\"method\":\"tmux\",\"to\":\"$slash\"}";
