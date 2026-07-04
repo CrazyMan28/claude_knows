@@ -17,10 +17,42 @@ BIN = os.path.join(ROOT, "bin")
 CACHE = os.path.join(ROOT, ".ck-cache")
 THROTTLE_SEC = 30 * 60
 
+try:
+    from ck_config import load_config
+except Exception:
+    def load_config():
+        return {"autoswitch": False}
+
 
 def _noop():
     print(json.dumps({}))
     sys.exit(0)
+
+
+def _apply_pending_switch(session):
+    """Apply a model switch queued by the prompt hook, now that the turn is done
+    and the pane is idle (safe to send /model). Silent no-op if nothing queued."""
+    if not load_config().get("autoswitch"):
+        return
+    safe = "".join(c for c in session if c.isalnum() or c in "._-") or "default"
+    pf = os.path.join(CACHE, "pending-switch-" + safe)
+    try:
+        with open(pf) as f:
+            tier = f.read().strip()
+    except OSError:
+        return
+    if tier:
+        try:
+            subprocess.run(
+                [os.path.join(BIN, "ck-switch"), tier, "--session", session],
+                capture_output=True, text=True, timeout=8,
+            )
+        except Exception:
+            pass
+    try:
+        os.remove(pf)
+    except OSError:
+        pass
 
 
 def _throttled(session):
@@ -41,11 +73,16 @@ def _throttled(session):
 
 
 def main():
+    if os.environ.get("CK_INTERNAL"):  # inner classifier session — do nothing
+        _noop()
     try:
         data = json.load(sys.stdin)
     except Exception:
         data = {}
     session = str(data.get("session_id") or "default")
+
+    # Apply any model switch queued on the first prompt (pane is idle now).
+    _apply_pending_switch(session)
 
     try:
         out = subprocess.run(

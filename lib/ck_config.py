@@ -14,7 +14,7 @@ CONFIG_PATH = os.path.join(ROOT, "config", "ck.config.json")
 DEFAULTS = {
     "default_tier": "sonnet",
     "autoswitch": False,
-    "router_llm_fallback": False,
+    "router_llm_fallback": True,
     "quiet": False,
     "usage": {
         "window_hours": 5,

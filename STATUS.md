@@ -16,7 +16,7 @@ Two features, both built and locally verified:
 
 | Component | State | Verified by |
 |---|---|---|
-| `bin/ck-route` (router engine) | ✅ done | `tests/test_ck_route.py` (12/12) + CLI smoke |
+| `bin/ck-route` (router engine) | ✅ done | **Haiku reads the prompt & picks** via `claude -p --model haiku` (verified: capital-of-france→haiku, distributed-rate-limiter→opus, ~5s); heuristic fallback tested 12/12 |
 | `bin/ck-switch` (live model switch) | ✅ done | real `tmux send-keys` injected `/opus` into a live pane |
 | `bin/ck-usage` (usage engine) | ✅ done | **REAL** via `GET /api/oauth/usage` (verified: 69% / resets 12:29am, matches `/usage`); JSONL estimate fallback; tests 11/11 |
 | `install.sh` (Linux/macOS one-liner) | ✅ done | `bash -n` clean; uses `claude plugin marketplace add` + `install` |

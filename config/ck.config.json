@@ -1,7 +1,7 @@
 {
   "default_tier": "sonnet",
   "autoswitch": false,
-  "router_llm_fallback": false,
+  "router_llm_fallback": true,
   "quiet": false,
   "usage": {
     "window_hours": 5,

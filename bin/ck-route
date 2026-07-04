@@ -14,6 +14,8 @@ it asks Haiku to break the tie. Any failure falls back to the heuristic result.
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -76,47 +78,40 @@ def classify(prompt, cfg):
     return default_tier, reason, "medium", ambiguous
 
 
-def llm_tiebreak(prompt):
-    """Ask Haiku haiku|sonnet|opus. Returns tier or None on any failure."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        return None
-    try:
-        import urllib.request
+CLASSIFY_Q = (
+    "You are a router that picks which Claude model should handle a coding task. "
+    "Reply with EXACTLY one lowercase word and nothing else:\n"
+    "  haiku  = trivial (typo, rename, one-line lookup, quick factual question)\n"
+    "  sonnet = normal coding (a feature, an edit, moderate reasoning)\n"
+    "  opus   = hard (multi-file refactor, architecture/design, deep debugging)\n"
+    "Task:\n"
+)
 
-        body = json.dumps(
-            {
-                "model": "claude-haiku-4-5",
-                "max_tokens": 8,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": (
-                            "Classify the difficulty of this coding task as exactly one "
-                            "word: haiku (trivial), sonnet (normal), or opus (hard/"
-                            "architectural). Task:\n" + prompt[:2000]
-                        ),
-                    }
-                ],
-            }
-        ).encode()
-        req = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages",
-            data=body,
-            headers={
-                "content-type": "application/json",
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            data = json.loads(resp.read().decode())
-        word = "".join(data["content"][0]["text"].lower().split())
-        for t in ("haiku", "sonnet", "opus"):
-            if t in word:
-                return t
+
+def llm_classify(prompt, timeout=18):
+    """Have Haiku read the prompt and pick the tier, using the user's own `claude`
+    CLI (their Max subscription). Returns 'haiku'|'sonnet'|'opus' or None on failure.
+
+    Runs with CK_INTERNAL=1 and MCP disabled so the inner session is fast and does
+    not re-trigger this plugin's hooks.
+    """
+    claude = shutil.which("claude")
+    if not claude:
+        return None
+    env = dict(os.environ, CK_INTERNAL="1")
+    try:
+        out = subprocess.run(
+            [
+                claude, "-p", "--model", "haiku", "--strict-mcp-config",
+                CLASSIFY_Q + prompt[:1500],
+            ],
+            capture_output=True, text=True, timeout=timeout, env=env,
+        ).stdout.lower()
     except Exception:
         return None
+    for t in ("opus", "sonnet", "haiku"):  # first tier mentioned wins
+        if t in out:
+            return t
     return None
 
 
@@ -127,12 +122,14 @@ def main():
     cfg = load_config()
     prompt = _read_prompt(argv)
 
+    # Instant heuristic first — it's the fallback if the model call is slow/fails.
     tier, reason, confidence, ambiguous = classify(prompt, cfg)
     source = "rules"
-    if ambiguous and cfg.get("router_llm_fallback"):
-        picked = llm_tiebreak(prompt)
+    # Primary path: let Haiku (the user's Max subscription) read the prompt and pick.
+    if cfg.get("router_llm_fallback") and prompt.strip():
+        picked = llm_classify(prompt)
         if picked:
-            tier, reason, confidence, source = picked, "Haiku tie-break", "high", "llm"
+            tier, reason, confidence, source = picked, "Haiku read the task", "high", "haiku"
 
     info = tier_info(cfg, tier)
     result = {

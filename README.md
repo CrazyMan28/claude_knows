@@ -4,7 +4,7 @@
 
 `claude_knows` is a [Claude Code](https://code.claude.com) plugin with two features:
 
-1. **Auto model-picker** — reads your **first prompt of a session** and picks the right model (**Haiku / Sonnet / Opus**), then stays out of your way for the rest of the session. When Claude Code runs inside **tmux** it *actually switches the live model*; otherwise it surfaces a one-keystroke suggestion, and it always routes dispatched subagents to the right model.
+1. **Auto model-picker** — **Haiku reads your first prompt of a session** (on your own Max/Pro subscription, via the `claude` CLI) and picks the right model (**Haiku / Sonnet / Opus**), then stays out of your way for the rest of the session. When Claude Code runs inside **tmux** it *actually switches the live model*; otherwise it surfaces a one-keystroke suggestion, and it always routes dispatched subagents to the right model. (Instant keyword heuristics are the offline fallback.)
 2. **Usage self-awareness** — reads your **real** 5-hour and 7-day usage % and reset times (the same `GET /api/oauth/usage` endpoint Claude Code's `/usage` uses, via your local OAuth token; a local-transcript estimate is the offline fallback), drops that status **into the chat**, and lets **Claude itself decide** whether to finish now or **schedule a resume** for when the limit resets.
 
 > Everything here was verified against the current Claude Code docs *and* against real community tools before it was built. The honest limits are spelled out below — nothing is oversold.
@@ -48,7 +48,7 @@ flowchart TD
 
 ## Feature 1 — how your first prompt gets its model
 
-Routing runs **once per session, on your first prompt** — it picks (and, in tmux, switches to) the model that fits the task you opened with, then goes quiet. Every later prompt in that session is a silent no-op.
+Routing runs **once per session, on your first prompt** — **Haiku reads the prompt and picks** the model that fits the task you opened with (and, in tmux, switches to it), then goes quiet. Every later prompt in that session is a silent no-op. Greetings ("hi", "thanks") are ignored so a real task decides the model, not chit-chat.
 
 ```mermaid
 sequenceDiagram
@@ -70,7 +70,7 @@ sequenceDiagram
     Note over CC: subagents dispatched<br/>use the routed model
 ```
 
-**The router (`ck-route`)** is hybrid: fast heuristic rules decide the obvious ~90% instantly and for free (keywords like *refactor/architect/debug* → opus, *typo/rename/what is* → haiku, length + code signals for the rest). An optional Haiku tie-break (`CK_ROUTER_LLM=1`) handles genuinely ambiguous first prompts. Off by default = zero cost and latency.
+**The router (`ck-route`)** asks **Haiku** to read the first prompt and return one of `haiku`/`sonnet`/`opus`, by shelling out to your own `claude -p --model haiku` (MCP disabled, guarded with `CK_INTERNAL=1` so it can't recurse) — so a real model does the picking, billed to your subscription, ~5s once per session. If that call is slow, offline, or fails, it instantly falls back to keyword heuristics (*refactor/architect/debug* → opus, *typo/rename/what is* → haiku). Set `CK_ROUTER_LLM=0` to force heuristics-only (instant, free, offline).
 
 ## Feature 2 — usage awareness & self-resume
 
@@ -106,7 +106,8 @@ sequenceDiagram
 
 | Capability | Mechanism | Status |
 |---|---|---|
-| Read prompt → recommend model | `UserPromptSubmit` hook + `ck-route` | ✅ |
+| **Haiku reads first prompt → picks model** | `ck-route` → `claude -p --model haiku` (your subscription) | ✅ real model |
+| Pick when offline / model call fails | instant keyword heuristics | ✅ fallback |
 | **Live-switch the model mid-session** | `ck-switch` → `tmux send-keys "/opus"` (proven tmux-orchestration pattern) | ✅ **in tmux** |
 | Switch outside tmux | `xdotool` (Linux/X11) / AppleScript (macOS) types `/model` | ✅ fragile fallback |
 | Recommend + one-keystroke switch | injected `🧭` line, you press `/opus` | ✅ always |
@@ -154,7 +155,7 @@ Edit `config/ck.config.json` or use env vars (env wins):
 | Env | Meaning | Default |
 |---|---|---|
 | `CK_AUTOSWITCH=1` | actually switch the live model (needs tmux/xdotool/macOS) | off (suggest only) |
-| `CK_ROUTER_LLM=1` | allow a Haiku tie-break on ambiguous prompts (needs `ANTHROPIC_API_KEY`) | off |
+| `CK_ROUTER_LLM=0` | disable the Haiku picker, use instant heuristics only | Haiku on |
 | `CK_NEAR_LIMIT_PCT=80` | usage % that triggers the near-limit message | 80 |
 | `CK_CEILING_TOKENS=N` | fixed usage ceiling instead of auto-learn | auto-learn |
 | `CK_QUIET=1` | only speak when the pick differs from the default / on switch | off |

@@ -17,7 +17,7 @@ What to do:
 - **The plugin already surfaced the recommendation to the user** (a `🧭` line), once, at the start of the session. You do **not** need to repeat it.
 - **If auto-switch is off** and the recommended tier clearly differs from the current model, you may briefly note that the user can press the slash command (e.g. `/opus`) to switch — but only once, don't nag.
 - **When you dispatch subagents** (the Task/Agent tool) for this task, pass the suggested tier as the subagent's `model` (e.g. `model: "opus"`). This is the one place model selection is fully under your control, so honor the routing there.
-- The router is a heuristic. If you can tell the task is harder/easier than the suggestion, trust your own judgement.
+- The pick came from **Haiku reading the prompt** (keyword heuristics are the offline fallback). If you can tell the task is harder/easier than the suggestion, trust your own judgement.
 
 Tiers: `haiku` = trivial/lookup, `sonnet` = normal coding (default), `opus` = hard/architectural.
 
