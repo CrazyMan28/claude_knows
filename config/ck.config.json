@@ -3,6 +3,7 @@
   "autoswitch": false,
   "router_llm_fallback": true,
   "quiet": false,
+  "start_model": null,
   "usage": {
     "window_hours": 5,
     "near_limit_pct": 80,

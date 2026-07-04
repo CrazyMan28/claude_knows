@@ -81,18 +81,21 @@ def _truthy(v):
 
 
 def _preswitch(session, slash, prompt):
-    """In tmux: type `/model X`+Enter, then re-type the user's prompt+Enter, so the
-    prompt runs on the freshly-switched model. Returns True if the keystrokes were
-    sent (caller then blocks the current turn). The re-typed prompt re-enters this
-    hook, but the session marker is already set, so it no-ops (no loop, no re-pick)."""
+    """In tmux: type `/model X`+Enter, auto-accept the "Switch model?" dialog (a
+    second Enter — its default is "Yes"), THEN re-type the user's prompt+Enter so it
+    runs on the freshly-switched model. Returns True if the keystrokes were sent
+    (caller then blocks the current turn). The re-typed prompt re-enters this hook,
+    but the session marker is already set, so it no-ops (no loop, no re-pick)."""
     pane = os.environ.get("TMUX_PANE")
     base = ["tmux", "send-keys"] + (["-t", pane] if pane else [])
     try:
         subprocess.run(base + ["-l", slash], timeout=5)
-        subprocess.run(base + ["Enter"], timeout=5)
-        time.sleep(0.5)
+        subprocess.run(base + ["Enter"], timeout=5)    # submit /model X
+        time.sleep(0.7)
+        subprocess.run(base + ["Enter"], timeout=5)    # confirm "Yes, switch"
+        time.sleep(0.6)
         subprocess.run(base + ["-l", prompt], timeout=5)
-        subprocess.run(base + ["Enter"], timeout=5)
+        subprocess.run(base + ["Enter"], timeout=5)    # run the prompt on new model
         return True
     except Exception:
         return False
