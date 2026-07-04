@@ -6,7 +6,5 @@
   "author": { "name": "CrazyMan28" },
   "repository": "https://github.com/CrazyMan28/claude_knows",
   "license": "MIT",
-  "keywords": ["model-router", "auto-model", "usage", "rate-limit", "tmux", "cron", "self-awareness"],
-  "hooks": "./hooks/hooks.json",
-  "skills": "./skills/"
+  "keywords": ["model-router", "auto-model", "usage", "rate-limit", "tmux", "cron", "self-awareness"]
 }
