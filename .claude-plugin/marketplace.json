@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "claude_knows",
+  "description": "Marketplace for the claude_knows plugin (auto model-picker + usage self-awareness).",
+  "owner": { "name": "CrazyMan28", "url": "https://github.com/CrazyMan28" },
+  "plugins": [
+    {
+      "name": "claude-knows",
+      "source": "./",
+      "version": "0.1.0",
+      "description": "Auto model-picker (prompt -> Haiku/Sonnet/Opus, live-switch via tmux) + usage self-awareness (reads own limit, schedules its own resume at reset).",
+      "category": "productivity",
+      "author": { "name": "CrazyMan28", "url": "https://github.com/CrazyMan28" },
+      "homepage": "https://github.com/CrazyMan28/claude_knows",
+      "tags": ["model-router", "auto-model", "usage", "rate-limit", "tmux", "cron"]
+    }
+  ]
+}
