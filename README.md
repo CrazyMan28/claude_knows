@@ -126,13 +126,6 @@ sequenceDiagram
 curl -fsSL https://raw.githubusercontent.com/CrazyMan28/claude_knows/main/install.sh | bash
 ```
 
-Installing into a second Claude config? Prefix it:
-
-```bash
-CLAUDE_CONFIG_DIR="$HOME/.claude-secondary" bash -c \
-  "$(curl -fsSL https://raw.githubusercontent.com/CrazyMan28/claude_knows/main/install.sh)"
-```
-
 **Or with the plugin CLI directly:**
 
 ```bash

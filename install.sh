@@ -4,9 +4,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/CrazyMan28/claude_knows/main/install.sh | bash
 #
 # Installs the plugin into Claude Code via the standard plugin CLI (no manual
-# clone needed). To install into a non-default config (e.g. a second Claude),
-# prefix with CLAUDE_CONFIG_DIR, e.g.:
-#   CLAUDE_CONFIG_DIR="$HOME/.claude-secondary" bash install.sh
+# clone needed).
 set -euo pipefail
 
 REPO_URL="https://github.com/CrazyMan28/claude_knows"
@@ -22,7 +20,7 @@ case "$(uname -s)" in
   Darwin) OS=mac ;;
   *) c_die "unsupported OS: $(uname -s) (Linux and macOS only)" ;;
 esac
-c_say "installing on ${OS} (config: ${CLAUDE_CONFIG_DIR:-$HOME/.claude})"
+c_say "installing on ${OS} into Claude Code"
 
 command -v claude  >/dev/null 2>&1 || c_die "the 'claude' CLI is required — https://code.claude.com"
 command -v python3 >/dev/null 2>&1 || c_die "python3 is required (the plugin's engines are Python)"
