@@ -34,6 +34,14 @@ claude plugin marketplace add "$REPO_URL" >/dev/null 2>&1 \
 c_say "installing plugin…"
 claude plugin install "$PLUGIN" --scope user
 
+# Verify it actually landed and is enabled (don't just assume the install worked).
+c_say "verifying…"
+if claude plugin list 2>/dev/null | grep -A4 -F "$PLUGIN" | grep -qiE "enabled|✔"; then
+  c_say "verified: $PLUGIN is enabled ✔"
+else
+  c_warn "installed, but couldn't confirm it's enabled — check with: claude plugin list"
+fi
+
 # Optional-capability advice.
 if [ "$OS" = linux ]; then
   command -v at >/dev/null 2>&1 || c_warn "'at' not found — self-resume will use a detached-timer fallback (install 'at' for cleaner scheduling)."
