@@ -2,7 +2,9 @@
 
 _Last updated: 2026-07-03_
 
-**Project:** private plugin for Claude Code. Owner: CrazyMan28. Tracker id: `proj-6225f0ce`.
+**Project:** Claude Code plugin. Owner: CrazyMan28. Tracker id: `proj-6225f0ce`.
+**Repo:** https://github.com/CrazyMan28/claude_knows (**public**).
+**Installed:** enabled in the `claude2` instance (`~/.claude-secondary`) as `claude-knows@claude_knows`, user scope — active next session start.
 
 ## Summary
 
