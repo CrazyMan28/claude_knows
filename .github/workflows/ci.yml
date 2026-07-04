@@ -30,13 +30,17 @@ jobs:
 
       - name: Shell syntax check
         run: |
-          for f in install.sh bin/ck-switch bin/ck-schedule-resume; do
+          for f in install.sh bin/ck bin/ck-switch bin/ck-schedule-resume; do
             echo "bash -n $f"; bash -n "$f"
           done
 
       - name: Engine smoke (no auth / no claude CLI)
         run: |
           set -x
+          # Toggle command
+          ./bin/ck off | grep -qi 'OFF'
+          ./bin/ck on  | grep -qi 'ON'
+          ./bin/ck status | grep -qi 'usage awareness'
           # Router — heuristics only (CK_ROUTER_LLM=0 avoids the Haiku CLI call)
           CK_ROUTER_LLM=0 ./bin/ck-route "refactor the auth module across services" | grep -q '"tier": "opus"'
           CK_ROUTER_LLM=0 ./bin/ck-route "fix a typo in the readme"                 | grep -q '"tier": "haiku"'

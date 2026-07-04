@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# ck — turn the claude_knows model-picker (+ tmux auto-launch) on or off.
+#
+#   ck on       enable the auto model-picker + tmux launch
+#   ck off      disable them (you pick the model yourself; plain terminal)
+#   ck status   show current state
+#
+# Usage-limit awareness is ALWAYS on and is never affected by this toggle.
+set -uo pipefail
+
+STATE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/claude_knows"
+STATE="$STATE_DIR/state.json"
+mkdir -p "$STATE_DIR"
+
+_set() { printf '{"picker":"%s"}\n' "$1" > "$STATE"; }
+_is_off() { [ -f "$STATE" ] && grep -q '"off"' "$STATE"; }
+
+case "${1:-status}" in
+  on)
+    _set on
+    echo "claude_knows: model-picker + tmux  ON   (usage awareness always on)"
+    ;;
+  off)
+    _set off
+    echo "claude_knows: model-picker + tmux  OFF  (you pick the model; usage awareness still on)"
+    ;;
+  status|"")
+    if _is_off; then
+      echo "claude_knows: model-picker + tmux  OFF  (usage awareness on)"
+    else
+      echo "claude_knows: model-picker + tmux  ON   (usage awareness on)"
+    fi
+    ;;
+  is-on)   # quiet: exit 0 if on, 1 if off (for scripts / the claude2 wrapper)
+    _is_off && exit 1 || exit 0
+    ;;
+  *)
+    echo "usage: ck {on|off|status}" >&2
+    exit 1
+    ;;
+esac

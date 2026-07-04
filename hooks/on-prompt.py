@@ -17,10 +17,13 @@ import time
 ROOT = os.environ.get("CLAUDE_PLUGIN_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "lib"))
 try:
-    from ck_config import load_config, state_dir
+    from ck_config import load_config, state_dir, picker_enabled
 except Exception:
     def load_config():
         return {"autoswitch": False, "quiet": False, "default_tier": "sonnet"}
+
+    def picker_enabled():
+        return True
 
     def state_dir():
         d = os.path.join(os.path.expanduser("~"), ".cache", "claude_knows")
@@ -135,6 +138,9 @@ def main():
     # Guard: the model-picker spawns `claude -p` internally; don't let that inner
     # session re-trigger this hook (infinite loop).
     if os.environ.get("CK_INTERNAL"):
+        _noop()
+    # Master toggle: `ck off` disables the model-picker entirely (you pick the model).
+    if not picker_enabled():
         _noop()
     try:
         data = json.load(sys.stdin)

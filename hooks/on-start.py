@@ -16,13 +16,16 @@ import sys
 ROOT = os.environ.get("CLAUDE_PLUGIN_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "lib"))
 try:
-    from ck_config import load_config, state_dir, read_default_model
+    from ck_config import load_config, state_dir, read_default_model, picker_enabled
 except Exception:
     def load_config():
         return {}
 
     def read_default_model():
         return None
+
+    def picker_enabled():
+        return True
 
     def state_dir():
         d = os.path.join(os.path.expanduser("~"), ".cache", "claude_knows")
@@ -55,8 +58,8 @@ def main():
     session = str(data.get("session_id") or "default")
     cfg = load_config()
 
-    # Only manage the model when the user opted into autoswitch.
-    if not cfg.get("autoswitch"):
+    # Only manage the model when the picker is on AND autoswitch is enabled.
+    if not picker_enabled() or not cfg.get("autoswitch"):
         _noop()
 
     # Capture the REAL default model now, so the SessionEnd hook can restore it and
