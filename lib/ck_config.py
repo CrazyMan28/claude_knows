@@ -98,10 +98,23 @@ def transcript_root():
     return os.path.join(os.path.expanduser("~"), ".claude", "projects")
 
 
+def config_dir():
+    """The active Claude Code config dir. Claude Code does not always pass
+    CLAUDE_CONFIG_DIR through to hooks, so fall back to deriving it from
+    CLAUDE_PLUGIN_ROOT (…/<config-dir>/plugins/cache/…), then ~/.claude."""
+    d = os.environ.get("CLAUDE_CONFIG_DIR")
+    if d:
+        return d
+    root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
+    i = root.find(os.sep + "plugins" + os.sep)
+    if i > 0:
+        return root[:i]
+    return os.path.join(os.path.expanduser("~"), ".claude")
+
+
 def settings_path():
-    """This session's settings.json (honours CLAUDE_CONFIG_DIR)."""
-    base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-    return os.path.join(base, "settings.json")
+    """This session's settings.json."""
+    return os.path.join(config_dir(), "settings.json")
 
 
 def read_default_model():

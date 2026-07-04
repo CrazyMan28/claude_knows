@@ -20,7 +20,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "lib"))
-from ck_config import load_config, tier_info  # noqa: E402
+from ck_config import load_config, tier_info, config_dir  # noqa: E402
 
 CODE_SIGNALS = re.compile(
     r"```|\bdef \b|\bfunction\b|\bclass \b|\bimport \b|=>|</|\bstack ?trace\b|"
@@ -98,7 +98,9 @@ def llm_classify(prompt, timeout=18):
     claude = shutil.which("claude")
     if not claude:
         return None
-    env = dict(os.environ, CK_INTERNAL="1")
+    # Ensure the classifier session authenticates against the SAME config dir as the
+    # main session (Claude Code doesn't always pass CLAUDE_CONFIG_DIR to hooks).
+    env = dict(os.environ, CK_INTERNAL="1", CLAUDE_CONFIG_DIR=config_dir())
     try:
         out = subprocess.run(
             [
