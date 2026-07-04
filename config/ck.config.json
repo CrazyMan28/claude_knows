@@ -11,9 +11,9 @@
     "weekly_near_limit_pct": 85
   },
   "tiers": {
-    "haiku":  { "model_id": "claude-haiku-4-5", "slash": "/haiku" },
-    "sonnet": { "model_id": "claude-sonnet-5",  "slash": "/sonnet" },
-    "opus":   { "model_id": "claude-opus-4-8",  "slash": "/opus" }
+    "haiku":  { "model_id": "claude-haiku-4-5", "slash": "/model haiku" },
+    "sonnet": { "model_id": "claude-sonnet-5",  "slash": "/model sonnet" },
+    "opus":   { "model_id": "claude-opus-4-8",  "slash": "/model opus" }
   },
   "rules": {
     "haiku_max_len": 35,

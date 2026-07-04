@@ -33,10 +33,11 @@ done
 emit() { printf '%s\n' "$1"; }
 
 if [ -z "$tier" ]; then emit '{"switched":false,"reason":"no tier given"}'; exit 0; fi
+# The real Claude Code command is `/model <alias>` — standalone /haiku etc. don't exist.
 case "$tier" in
-  /haiku|haiku)   slash="/haiku";  tier="haiku";;
-  /sonnet|sonnet) slash="/sonnet"; tier="sonnet";;
-  /opus|opus)     slash="/opus";   tier="opus";;
+  /haiku|haiku|/model\ haiku)     slash="/model haiku";  tier="haiku";;
+  /sonnet|sonnet|/model\ sonnet)  slash="/model sonnet"; tier="sonnet";;
+  /opus|opus|/model\ opus)        slash="/model opus";   tier="opus";;
   *) emit "{\"switched\":false,\"reason\":\"unknown tier: $tier\"}"; exit 0;;
 esac
 
