@@ -42,6 +42,21 @@ else
   c_warn "installed, but couldn't confirm it's enabled — check with: claude plugin list"
 fi
 
+# Put the `ck` toggle command on PATH so it works from any terminal.
+mkdir -p "$HOME/.local/bin"
+CKSRC=""
+for d in "$HOME/.claude/plugins/cache/claude_knows/claude-knows"/*/bin/ck \
+         "${CLAUDE_CONFIG_DIR:-/nonexistent}/plugins/cache/claude_knows/claude-knows"/*/bin/ck; do
+  [ -f "$d" ] && CKSRC="$d"
+done
+if [ -n "$CKSRC" ]; then
+  cp "$CKSRC" "$HOME/.local/bin/ck" && chmod +x "$HOME/.local/bin/ck"
+  c_say "installed 'ck' command → ~/.local/bin  (ck on | ck off | ck status)"
+  case ":$PATH:" in *":$HOME/.local/bin:"*) : ;; *) c_warn "~/.local/bin isn't on your PATH — add it so 'ck' works everywhere." ;; esac
+else
+  c_warn "couldn't locate 'ck' in the plugin cache (toggle command not installed to PATH)."
+fi
+
 # Optional-capability advice.
 if [ "$OS" = linux ]; then
   command -v at >/dev/null 2>&1 || c_warn "'at' not found — self-resume will use a detached-timer fallback (install 'at' for cleaner scheduling)."
@@ -71,6 +86,11 @@ else
 # Auto-launch `claude` inside tmux with claude_knows live model-switching ON.
 # One-off without tmux:  CK_NO_TMUX=1 claude    •    Remove: delete this block.
 claude() {
+  # `ck off` → plain claude (you pick the model, no tmux). Usage awareness still runs.
+  local _ckst="${XDG_CONFIG_HOME:-$HOME/.config}/claude_knows/state.json"
+  if [ -f "$_ckst" ] && grep -q '"off"' "$_ckst"; then
+    command claude "$@"; return
+  fi
   if [ -n "$TMUX" ] || [ -n "$CK_NO_TMUX" ] || ! command -v tmux >/dev/null 2>&1; then
     CK_AUTOSWITCH=1 command claude "$@"
   else

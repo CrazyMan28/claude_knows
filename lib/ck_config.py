@@ -140,6 +140,23 @@ def write_default_model(model):
         return False
 
 
+def toggle_path():
+    """User-controlled on/off state (set by the `ck` command). Separate from the
+    plugin config so it can be flipped from any terminal without editing files."""
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "claude_knows", "state.json")
+
+
+def picker_enabled():
+    """Is the model-picker (+ tmux autoswitch) turned ON? Default: on.
+    NOTE: usage-limit awareness is NEVER gated by this — it's always on."""
+    try:
+        with open(toggle_path(), "r", encoding="utf-8") as f:
+            return (json.load(f) or {}).get("picker", "on") != "off"
+    except (OSError, json.JSONDecodeError):
+        return True
+
+
 def state_dir():
     """Stable, writable dir for per-session state (markers, pending switches).
 

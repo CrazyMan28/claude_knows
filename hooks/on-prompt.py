@@ -17,10 +17,13 @@ import time
 ROOT = os.environ.get("CLAUDE_PLUGIN_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "lib"))
 try:
-    from ck_config import load_config, state_dir
+    from ck_config import load_config, state_dir, picker_enabled
 except Exception:
     def load_config():
         return {"autoswitch": False, "quiet": False, "default_tier": "sonnet"}
+
+    def picker_enabled():
+        return True
 
     def state_dir():
         d = os.path.join(os.path.expanduser("~"), ".cache", "claude_knows")
@@ -136,6 +139,9 @@ def main():
     # session re-trigger this hook (infinite loop).
     if os.environ.get("CK_INTERNAL"):
         _noop()
+    # Master toggle: `ck off` disables the model-picker entirely (you pick the model).
+    if not picker_enabled():
+        _noop()
     try:
         data = json.load(sys.stdin)
     except Exception:
@@ -199,13 +205,22 @@ def main():
     # running a hard task on a weaker model is the case worth re-running for; downgrading
     # a trivial question isn't. Only in tmux, single-line prompt (multi-line is unsafe to
     # re-type via send-keys). Falls through to the safe queued path otherwise.
+    # ONLY EVER UPGRADE — never downgrade to a weaker model. Sonnet is the floor,
+    # Opus the ceiling. Auto-downgrading to Haiku stranded the user on a weak model,
+    # which is exactly what we don't want; a trivial prompt just stays on Sonnet.
     rank = {"haiku": 0, "sonnet": 1, "opus": 2}
     default_tier = cfg.get("default_tier", "sonnet")
+    is_upgrade = rank.get(tier, 1) > rank.get(default_tier, 1)
+
+    # PRE-SWITCH (opt-in, CK_PRESWITCH=1): so your FIRST task runs on the right model,
+    # switch NOW and re-run this exact prompt on the new model — blocking the current
+    # turn so nothing runs on the wrong one. Upgrades only, tmux only, single-line
+    # prompt (multi-line is unsafe to re-type via send-keys).
     if (
         cfg.get("autoswitch")
         and _truthy(os.environ.get("CK_PRESWITCH"))
         and os.environ.get("TMUX")
-        and rank.get(tier, 1) > rank.get(default_tier, 1)
+        and is_upgrade
         and "\n" not in prompt
         and len(prompt) <= 400
     ):
@@ -217,21 +232,27 @@ def main():
             }))
             return
 
-    # Otherwise: queue the switch for when THIS turn finishes (Stop hook applies it
-    # while the pane is idle — sending /model mid-prompt would collide with the submit).
+    # Otherwise, queue an UPGRADE for when THIS turn finishes (Stop hook applies it
+    # while the pane is idle). Downgrades are never queued — you stay on Sonnet.
     switched_note = ""
-    if cfg.get("autoswitch"):
+    if cfg.get("autoswitch") and is_upgrade:
         try:
             os.makedirs(CACHE, exist_ok=True)
             with open(_pending(session), "w") as f:
                 f.write(tier)
-            switched_note = f" (switching to {tier} after this reply)"
+            switched_note = f" (upgrading to {tier} after this reply)"
         except OSError:
             pass
 
-    # Quiet mode: stay silent when the pick is just the default and nothing was switched.
-    if cfg.get("quiet") and tier == cfg.get("default_tier", "sonnet") and not switched_note:
-        _noop()
+    # No upgrade → don't nag with a switch line; just tell Claude the tier for subagent
+    # routing (quiet, no systemMessage) and stay on the current model.
+    if not switched_note:
+        ctx = (
+            f"[claude_knows] This looks like a {tier}-level task; staying on your current "
+            f"model. When you dispatch subagents, prefer model '{tier}'."
+        )
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": ctx}}))
+        return
 
     ctx = (
         f"[claude_knows] Best model for this task: {tier} ({model_id}) — {reason}.{switched_note} "

@@ -158,6 +158,18 @@ Then **reload your shell** (`exec $SHELL`) or open a new terminal.
 
 Requirements: `python3` (engines) + the `claude` CLI. For live switching: `tmux` (recommended) or `xdotool`/macOS. For self-resume: `at` (or a detached-timer fallback).
 
+## Turn it on / off
+
+The installer adds a `ck` command (on your PATH) to toggle the **model-picker + tmux** — from any terminal:
+
+```bash
+ck off      # you pick the model yourself, no tmux
+ck on       # auto model-picker + tmux launch (default)
+ck status   # show current state
+```
+
+**Usage-limit awareness is always on** and is never affected by this toggle.
+
 ## Configure
 
 Edit `config/ck.config.json` or use env vars (env wins):
